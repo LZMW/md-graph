@@ -1,0 +1,195 @@
+// =============================================================================
+// MdGraph — Facade 外观模式
+// 连接全部子系统（Indexer, Searcher, Traverser, Watcher）
+// 暴露单一入口：status / navigate / search
+// =============================================================================
+import path from 'node:path';
+import fs from 'node:fs';
+import { FileStore } from './storage/filestore.js';
+import { SqliteDbAdapter } from './storage/database.js';
+import { ParserRegistry, registerDefaultParsers } from './analysis/parser/index.js';
+import { Indexer } from './analysis/indexer.js';
+import { Searcher } from './analysis/searcher.js';
+import { Traverser } from './analysis/traverser.js';
+import { Watcher } from './analysis/watcher.js';
+import type {
+  SearchResult,
+  SearchOptions,
+  NavResult,
+  Direction,
+  IndexResult,
+  StalenessInfo,
+} from './types.js';
+
+// ---------------------------------------------------------------------------
+// MdGraph 状态
+// ---------------------------------------------------------------------------
+export interface MdGraphStatus {
+  totalFiles: number;
+  totalNodes: number;
+  totalEdges: number;
+  lastIndexedAt: string;
+  stale: boolean;
+  staleFileCount: number;
+}
+
+// ---------------------------------------------------------------------------
+// MdGraphOptions
+// ---------------------------------------------------------------------------
+export interface MdGraphOptions {
+  dbPath?: string;       // 数据库路径，默认 rootPath/.md-graph/index.db
+  storageDir?: string;   // 存储目录，默认 rootPath/.md-graph
+  autoWatch?: boolean;   // 是否自动启动文件监控，默认 false
+  debug?: boolean;       // 是否输出调试日志
+}
+
+// =============================================================================
+// MdGraph — Facade 主类
+// =============================================================================
+export class MdGraph {
+  private readonly rootPath: string;
+  private readonly dbPath: string;
+  private readonly storageDir: string;
+  private readonly autoWatch: boolean;
+  private readonly debug: boolean;
+
+  private db!: SqliteDbAdapter;
+  private fileStore!: FileStore;
+  private indexer!: Indexer;
+  private searcher!: Searcher;
+  private traverser!: Traverser;
+  private watcher!: Watcher;
+  private initialized = false;
+
+  constructor(rootPath: string, options?: MdGraphOptions) {
+    this.rootPath = path.resolve(rootPath);
+    this.storageDir = options?.storageDir ?? path.join(this.rootPath, '.md-graph');
+    this.dbPath = options?.dbPath ?? path.join(this.storageDir, 'index.db');
+    this.autoWatch = options?.autoWatch ?? false;
+    this.debug = options?.debug ?? false;
+    this.log('MdGraph 实例创建', { rootPath: this.rootPath, dbPath: this.dbPath });
+  }
+
+  // =========================================================================
+  // init — 初始化子系统（惰性初始化）
+  // =========================================================================
+  async init(): Promise<void> {
+    if (this.initialized) return;
+
+    this.log('初始化 MdGraph 子系统');
+
+    // 初始化存储
+    if (!fs.existsSync(this.storageDir)) {
+      fs.mkdirSync(this.storageDir, { recursive: true });
+    }
+    this.db = new SqliteDbAdapter(this.dbPath);
+    this.fileStore = new FileStore(this.rootPath);
+
+    // 注册默认解析器
+    registerDefaultParsers();
+
+    // 初始化分析模块
+    this.indexer = new Indexer(this.fileStore, this.db, ParserRegistry);
+    this.searcher = new Searcher(this.db);
+    this.traverser = new Traverser(this.db);
+
+    // 初始化 watcher
+    this.watcher = new Watcher(this.rootPath, this.indexer);
+    if (this.autoWatch) {
+      this.watcher.start();
+      this.log('文件监控已启动');
+    }
+
+    this.initialized = true;
+    this.log('MdGraph 子系统初始化完成');
+  }
+
+  // =========================================================================
+  // status — 返回索引状态
+  // =========================================================================
+  async status(): Promise<MdGraphStatus> {
+    await this.ensureInitialized();
+
+    // 运行增量索引确保最新
+    try {
+      await this.indexer.incrementalIndex(this.rootPath);
+    } catch {
+      // 索引失败不影响状态查询
+    }
+
+    const dbStatus = this.db.getStatus();
+    const staleInfo = this.db.getStaleInfo();
+
+    return {
+      totalFiles: dbStatus.totalFiles,
+      totalNodes: dbStatus.totalNodes,
+      totalEdges: dbStatus.totalEdges,
+      lastIndexedAt: staleInfo.lastIndexedAt,
+      stale: staleInfo.stale,
+      staleFileCount: staleInfo.staleFileCount,
+    };
+  }
+
+  // =========================================================================
+  // search — 全文搜索
+  // =========================================================================
+  async search(query: string, options?: SearchOptions): Promise<SearchResult> {
+    await this.ensureInitialized();
+    return this.searcher.search(query, options);
+  }
+
+  // =========================================================================
+  // navigate — BFS 导航
+  // =========================================================================
+  async navigate(
+    nodeId: number,
+    direction: Direction,
+    depth: number = 1,
+  ): Promise<NavResult> {
+    await this.ensureInitialized();
+    return this.traverser.navigate(nodeId, direction, depth);
+  }
+
+  // =========================================================================
+  // fullIndex — 全量索引
+  // =========================================================================
+  async fullIndex(rootPath?: string): Promise<IndexResult> {
+    await this.ensureInitialized();
+    return this.indexer.fullIndex(rootPath ?? this.rootPath);
+  }
+
+  // =========================================================================
+  // close — 关闭所有资源
+  // =========================================================================
+  async close(): Promise<void> {
+    if (this.watcher) {
+      this.watcher.close();
+    }
+    if (this.db) {
+      this.db.close();
+    }
+    this.initialized = false;
+    this.log('MdGraph 已关闭');
+  }
+
+  // =========================================================================
+  // 内部方法
+  // =========================================================================
+
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initialized) {
+      await this.init();
+    }
+  }
+
+  private log(message: string, data?: unknown): void {
+    if (this.debug) {
+      const prefix = `[MdGraph]`;
+      if (data) {
+        console.error(prefix, message, data);
+      } else {
+        console.error(prefix, message);
+      }
+    }
+  }
+}
