@@ -189,10 +189,13 @@ export function createCli(): Command {
     .action(async (options: { mcp?: boolean; path?: string }) => {
       try {
         if (options.mcp) {
-          // 项目自动发现：优先 --path，其次自动向上查找 .md-graph/
+          // 项目自动发现三层优先级：
+          // 1. --path 显式指定  2. CLAUDE_PROJECT_DIR 环境变量  3. cwd 向上查找
           const projectRoot = options.path
             ? path.resolve(options.path)
-            : findNearestMdGraphRoot(process.cwd());
+            : (process.env.CLAUDE_PROJECT_DIR
+              ? findNearestMdGraphRoot(process.env.CLAUDE_PROJECT_DIR)
+              : findNearestMdGraphRoot(process.cwd()));
 
           if (!projectRoot) {
             process.stderr.write(JSON.stringify({
