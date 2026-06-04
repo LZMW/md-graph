@@ -161,7 +161,7 @@ export class TemplateEngine {
 
     // 按 targetPath 去重合并：同目标的链接聚合行号和链接文字
     const merged = new Map<string, {
-      tfn: string; tp: string; slrs: string[]; lts: Set<string>; tt: string;
+      tfn: string; tp: string; lts: Set<string>; tt: string;
     }>();
     for (const l of links) {
       const tp = l['targetPath'] as string ?? l['linkText'] as string ?? '';
@@ -169,25 +169,19 @@ export class TemplateEngine {
         merged.set(tp, {
           tfn: l['targetFileName'] as string ?? '',
           tp,
-          slrs: [],
           lts: new Set(),
           tt: l['targetTopic'] as string ?? '',
         });
       }
-      const m = merged.get(tp)!;
-      const slr = l['sourceLineRanges'] as string ?? '';
-      if (slr && !m.slrs.includes(slr)) m.slrs.push(slr);
       const lt = l['linkText'] as string ?? '';
-      if (lt) m.lts.add(lt);
+      if (lt) merged.get(tp)!.lts.add(lt);
     }
 
     if (merged.size === 0) {
       result += 'Navigation Results (0 links found for this file)\n';
     } else {
       for (const m of merged.values()) {
-        result += `- → **${m.tfn || m.tp}** (${m.tp})\n`;
-        const slrStr = m.slrs.join(', ');
-        if (slrStr) result += `  行 ${slrStr}`;
+        result += `- → **${m.tfn || m.tp}** (${m.tp})`;
         if (m.lts.size > 0) result += ` · "${[...m.lts].join('", "')}"`;
         result += '\n';
         if (m.tt) result += `  主题: ${m.tt}\n`;
