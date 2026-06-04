@@ -15,38 +15,49 @@ md-graph 是一个基于 SQLite FTS5 的 Markdown 知识图谱引擎，专为 AI
 ## 安装
 
 ```bash
-npm install md-graph
+git clone https://github.com/LZMW/md-graph.git
+cd md-graph
+npm install
+npm run build
+npm link
 ```
 
 ## 快速开始
 
-### 1. 初始化仓库
+### 1. 初始化索引
 
 ```bash
-md-graph init /path/to/your/markdown/project
+cd /path/to/your/markdown/project
+md-graph init
 ```
 
-### 2. 查询索引状态
+这会在项目根目录创建 `.md-graph/index.db`，索引所有 Markdown 文件。
+
+### 2. 注册 MCP 服务器
 
 ```bash
-md-graph status /path/to/your/markdown/project
+claude mcp add --transport stdio md-graph -- node /path/to/md-graph/dist/cli.js serve --mcp --path /path/to/your/markdown/project
 ```
 
-### 3. 以 MCP 服务器模式运行
+### 3. 重启 Claude Code，开始使用
 
-```bash
-npx md-graph mcp /path/to/your/markdown/project
 ```
+md_status()     → 查看最近变更
+md_search()     → 全文搜索
+md_navigate()   → 浏览文档链接关系
+```
+
+> **注意**：`claude mcp add` 只需要执行一次。之后每次重启 Claude Code，md-graph 会自动连接。
 
 ## CLI 命令
 
-| 命令 | 描述 | 参数 | 输出 |
-|------|------|------|------|
-| `init` | 初始化新的 md-graph 仓库 | `[dir]` 项目根目录（默认 `.`） | JSON `{ success, message, storageDir }` |
-| `status` | 显示索引状态 | `[dir]` 项目根目录（默认 `.`） | JSON `{ success, totalFiles, totalNodes, totalEdges, lastIndexedAt, stale, staleFileCount }` |
-| `uninstall` | 删除 md-graph 存储目录 | `[dir]` 项目根目录（默认 `.`） | JSON `{ success, message }` |
-
-所有命令均输出纯 JSON 到 stdout，错误信息输出到 stderr。
+| 命令 | 描述 |
+|------|------|
+| `md-graph init [dir]` | 初始化索引（默认当前目录） |
+| `md-graph status [dir]` | 查看索引状态 + 变更感知 |
+| `md-graph serve --mcp [--path dir]` | 启动 MCP stdio 服务器 |
+| `md-graph install` | 自动写入 MCP 配置和权限 |
+| `md-graph uninstall [dir]` | 删除索引目录 |
 
 ## MCP 工具
 

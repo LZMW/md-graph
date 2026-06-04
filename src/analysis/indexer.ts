@@ -8,7 +8,7 @@ import path from 'node:path';
 import { FileStore } from '../storage/filestore.js';
 import { SqliteDbAdapter } from '../storage/database.js';
 import { ParserRegistry } from './parser/index.js';
-import type { DocNode, FileInfo, IndexResult, ChangeDetail, NodeRecord } from '../types.js';
+import type { DocNode, FileInfo, IndexResult, ChangeDetail } from '../types.js';
 
 // ---------------------------------------------------------------------------
 // 简化 ChangeNode 类型 — 用于 computeChanges 的入参
@@ -295,6 +295,14 @@ export class Indexer {
     let fileId: number;
 
     if (existingFile) {
+      // 计算变更差异（先获取旧节点再删除）
+      const oldNodes = this.db.getNodesByFile(existingFile.id);
+      const changes = this.computeChanges(
+        oldNodes.map(n => ({ heading_path: n.heading_path, line_ranges: n.line_ranges })),
+        parsed.nodes.map(n => ({ headingPath: n.headingPath, lineStart: n.lineStart, lineEnd: n.lineEnd })),
+      );
+      const changeDetailsJson = changes.length > 0 ? JSON.stringify(changes) : null;
+
       // 删除旧节点和边，然后更新文件记录
       this.db.deleteNodesByFile(existingFile.id);
       this.db.updateFile(existingFile.id, {
@@ -303,6 +311,7 @@ export class Indexer {
         mtime_ms: stats.mtimeMs,
         node_count: parsed.nodes.length,
         indexed_at: new Date().toISOString(),
+        last_change_details: changeDetailsJson,
       });
       fileId = existingFile.id;
     } else {
@@ -324,6 +333,8 @@ export class Indexer {
         ? (parsedIdToDbId.get(node.parentId) ?? null)
         : null;
 
+      const lineRanges = node.lineStart ? `${node.lineStart}-${node.lineEnd ?? node.lineStart}` : null;
+
       const result = this.db.insertNode({
         file_id: fileId,
         type: node.type,
@@ -336,6 +347,7 @@ export class Indexer {
         ordinal: node.ordinal,
         heading_level: node.headingLevel ?? null,
         heading_path: node.headingPath ?? null,
+        line_ranges: lineRanges,
       });
       parsedIdToDbId.set(nodeId, result.id);
       insertedNodeIds.push(result.id);

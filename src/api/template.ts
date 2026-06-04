@@ -2,6 +2,7 @@
 // TemplateEngine — 自然语言模板引擎
 // 支持变量插值、条件块、_next 引导
 // 提供 md_status / md_search / md_navigate 三个预置模板
+// + STATUS / SEARCH / NAVIGATE 三个静态模板
 // =============================================================================
 
 // ---------------------------------------------------------------------------
@@ -185,5 +186,99 @@ export class TemplateEngine {
       if (val === undefined || val === null) return `{{${key}}}`;
       return String(val);
     });
+  }
+
+  // =========================================================================
+  // renderStatus — 使用 STATUS 模板渲染变更批次
+  // =========================================================================
+  renderStatus(data: Record<string, unknown>): string {
+    const batches = (data['batches'] as Array<Record<string, unknown>>) ?? [];
+    const batchCount = data['batchCount'] ?? 0;
+    const searchHint = (data['search_hint'] as string) ?? '';
+
+    let result = `## 最近变更 (${batchCount} 批)\n\n`;
+
+    if (batches.length > 0) {
+      const batchParts: string[] = [];
+      for (const batch of batches) {
+        const files = (batch['files'] as Array<Record<string, unknown>>) ?? [];
+        const idx = batch['index'];
+        const tw = batch['timeWindow'] as string;
+        const fc = batch['fileCount'] ?? files.length;
+
+        const fileLines = files.map((f) => {
+          const fn = f['fileName'] as string ?? '';
+          const tp = f['type'] as string ?? '';
+          const p = f['path'] as string ?? '';
+          const lr = f['lineRanges'] as string ?? '';
+          const hp = f['headingPath'] as string ?? '';
+          const kl = f['keywords_line'] as string ?? '';
+          const rl = f['related_line'] as string ?? '';
+          return `- **${fn}** (${tp}, ${p})\n  行 ${lr} · ${hp}\n  ${kl}\n  ${rl}`;
+        }).join('\n');
+
+        batchParts.push(
+          `### 批次 ${idx}: ${tw} — ${fc} 个文件变更\n\n${fileLines}`,
+        );
+      }
+      result += batchParts.join('\n') + '\n\n';
+    }
+
+    result += `【务必】使用 Read 工具读取上方文件路径和行号，如有必要直接查看文件全部内容。${searchHint}\n`;
+    result += '【不要】假设以上文件列表完整——未出现在变更列表中的文件可能仍包含相关内容。';
+    return result;
+  }
+
+  // =========================================================================
+  // renderSearch — 使用 SEARCH 模板渲染搜索结果
+  // =========================================================================
+  renderSearch(data: Record<string, unknown>): string {
+    const query = (data['query'] as string) ?? '';
+    const totalResults = data['totalResults'] ?? 0;
+    const results = (data['results'] as Array<Record<string, unknown>>) ?? [];
+    const searchHint = (data['search_hint'] as string) ?? '';
+
+    let result = `## 搜索结果: "${query}"\n\n找到 **${totalResults}** 条匹配结果：\n\n`;
+
+    if (results.length > 0) {
+      for (const r of results) {
+        result += `- **${r['fileName'] ?? ''}** (${r['filePath'] ?? ''})\n`;
+        result += `  行 ${r['lineRanges'] ?? ''} · ${r['headingPath'] ?? ''}\n`;
+        result += `  > ${r['snippet'] ?? ''}\n`;
+      }
+    } else {
+      result += '未找到匹配内容。\n';
+    }
+
+    result += `\n${searchHint}`;
+    return result;
+  }
+
+  // =========================================================================
+  // renderNavigate — 使用 NAVIGATE 模板渲染导航结果
+  // =========================================================================
+  renderNavigate(data: Record<string, unknown>): string {
+    const sourcePath = (data['sourcePath'] as string) ?? '';
+    const topic = (data['topic'] as string) ?? '';
+    const direction = (data['direction'] as string) ?? '';
+    const totalLinks = data['totalLinks'] ?? 0;
+    const links = (data['links'] as Array<Record<string, unknown>>) ?? [];
+    const searchHint = (data['search_hint'] as string) ?? '';
+
+    let result = `## 文件关系: ${sourcePath}\n\n`;
+    result += `**主题**: ${topic}\n`;
+    result += `**方向**: ${direction}\n`;
+    result += `**链接数**: ${totalLinks}\n\n`;
+
+    if (links.length > 0) {
+      for (const l of links) {
+        result += `- [${l['linkText'] ?? ''}](${l['targetPath'] ?? ''}) [${l['status'] ?? ''}]\n`;
+      }
+    } else {
+      result += '暂无链接信息。\n';
+    }
+
+    result += `\n${searchHint}`;
+    return result;
   }
 }

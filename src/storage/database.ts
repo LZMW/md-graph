@@ -14,6 +14,9 @@ import type {
   NodeRecord,
   EdgeInsert,
   EdgeRecord,
+  ChangeItem,
+  Batch,
+  ChangeBatchResult,
 } from '../types.js';
 
 // ---------------------------------------------------------------------------
@@ -24,6 +27,8 @@ export interface SearchOptions {
   maxResults?: number;   // default: 10, max: 50
   offset?: number;       // default: 0
   fileGlob?: string;     // 文件路径 glob 过滤
+  type?: 'heading' | 'paragraph' | 'code_block';
+  file?: string;         // 按文件路径精确过滤
 }
 
 export interface SearchResultRow {
@@ -153,9 +158,9 @@ export class SqliteDbAdapter {
   insertNode(nodeData: NodeInsert): { id: number } {
     const stmt = this.db.prepare(`
       INSERT INTO doc_nodes (file_id, type, line_start, line_end, col_start, col_end,
-                             searchable, parent_id, ordinal, heading_level, heading_path)
+                             searchable, parent_id, ordinal, heading_level, heading_path, line_ranges)
       VALUES (@file_id, @type, @line_start, @line_end, @col_start, @col_end,
-              @searchable, @parent_id, @ordinal, @heading_level, @heading_path)
+              @searchable, @parent_id, @ordinal, @heading_level, @heading_path, @line_ranges)
     `);
     const result = stmt.run({
       file_id: nodeData.file_id,
@@ -169,6 +174,7 @@ export class SqliteDbAdapter {
       ordinal: nodeData.ordinal,
       heading_level: nodeData.heading_level ?? null,
       heading_path: nodeData.heading_path ?? null,
+      line_ranges: nodeData.line_ranges ?? null,
     });
     return { id: Number(result.lastInsertRowid) };
   }
@@ -176,9 +182,9 @@ export class SqliteDbAdapter {
   insertNodes(nodes: NodeInsert[]): number[] {
     const stmt = this.db.prepare(`
       INSERT INTO doc_nodes (file_id, type, line_start, line_end, col_start, col_end,
-                             searchable, parent_id, ordinal, heading_level, heading_path)
+                             searchable, parent_id, ordinal, heading_level, heading_path, line_ranges)
       VALUES (@file_id, @type, @line_start, @line_end, @col_start, @col_end,
-              @searchable, @parent_id, @ordinal, @heading_level, @heading_path)
+              @searchable, @parent_id, @ordinal, @heading_level, @heading_path, @line_ranges)
     `);
 
     const ids: number[] = [];
@@ -196,6 +202,7 @@ export class SqliteDbAdapter {
           ordinal: item.ordinal,
           heading_level: item.heading_level ?? null,
           heading_path: item.heading_path ?? null,
+          line_ranges: item.line_ranges ?? null,
         });
         ids.push(Number(result.lastInsertRowid));
       }
@@ -354,6 +361,16 @@ export class SqliteDbAdapter {
       params.push(likePattern);
     }
 
+    if (options.file) {
+      sql += ' AND f.path = ?';
+      params.push(options.file);
+    }
+
+    if (options.type) {
+      sql += ' AND n.type = ?';
+      params.push(options.type);
+    }
+
     sql += ' ORDER BY rank LIMIT ? OFFSET ?';
     params.push(maxResults, offset);
 
@@ -458,6 +475,67 @@ export class SqliteDbAdapter {
       WHERE indexed_at > ?
       ORDER BY indexed_at DESC
     `).all(timestamp) as ChangedFileRecord[];
+  }
+
+  // =========================================================================
+  // 变更批次
+  // =========================================================================
+
+  getChangeBatches(): ChangeBatchResult {
+    const files = this.db.prepare(`
+      SELECT id, path, last_change_details, indexed_at
+      FROM files
+      WHERE last_change_details IS NOT NULL
+      ORDER BY indexed_at DESC
+    `).all() as Array<{ id: number; path: string; last_change_details: string; indexed_at: string }>;
+
+    if (files.length === 0) {
+      return { batches: [], batchCount: 0, search_hint: '暂无变更记录。' };
+    }
+
+    // 按日期分组
+    const batchMap = new Map<string, ChangeItem[]>();
+    for (const file of files) {
+      const day = (file.indexed_at || '').slice(0, 10) || 'unknown';
+      if (!batchMap.has(day)) batchMap.set(day, []);
+
+      let details: Array<{ type: string; headingPath: string; lineRanges: string; boldTerms?: string[]; italicTerms?: string[]; codeTerms?: string[] }> = [];
+      try {
+        details = JSON.parse(file.last_change_details);
+      } catch {
+        // ignore parse errors
+      }
+
+      const fileName = file.path.replace(/\\/g, '/').split('/').pop() || file.path;
+      for (const d of details) {
+        batchMap.get(day)!.push({
+          fileName,
+          type: d.type as ChangeItem['type'],
+          path: file.path,
+          lineRanges: d.lineRanges || '',
+          headingPath: d.headingPath || '',
+          keywords_line: d.boldTerms?.length ? `关键词: ${d.boldTerms.join(', ')}` : '',
+          related_line: '',
+        });
+      }
+    }
+
+    const batches: Batch[] = [];
+    let index = 1;
+    for (const [day, items] of batchMap) {
+      batches.push({
+        index: index++,
+        timeWindow: day,
+        fileCount: items.length,
+        files: items,
+      });
+    }
+
+    return {
+      batches,
+      batchCount: batches.length,
+      search_hint: '试试搜索关键词，或使用 navigate 查看文件关系。',
+    };
   }
 
   // =========================================================================

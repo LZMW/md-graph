@@ -4,6 +4,7 @@
 // 使用标准 JSON-RPC 协议手动实现 MCP 服务器
 // 提供 3 个工具: md_status, md_search, md_navigate
 // =============================================================================
+import { MdGraphError } from '../types.js';
 import { TemplateEngine } from './template.js';
 import { createServerInstructions, getToolDefinitions } from './server-instructions.js';
 
@@ -50,7 +51,7 @@ export interface MdGraphFacade {
     stale: boolean;
     staleFileCount: number;
   }>;
-  search(query: string, options?: { maxResults?: number; offset?: number }): Promise<{
+  search(query: string, options?: { maxResults?: number; offset?: number; type?: 'heading' | 'paragraph' | 'code_block'; file?: string }): Promise<{
     totalResults: number;
     results: Array<Record<string, unknown>>;
     stale: boolean;
@@ -73,6 +74,9 @@ export interface MdGraphFacade {
     sourceFileName: string;
   }>;
   close(): Promise<void>;
+  renderStatus(): Promise<string>;
+  renderSearch(query: string, options?: { maxResults?: number; offset?: number; type?: 'heading' | 'paragraph' | 'code_block'; file?: string }): Promise<string>;
+  renderNavigate(nodeIdOrPath: number | string, direction: string, depth?: number): Promise<string>;
 }
 
 // =============================================================================
@@ -117,12 +121,22 @@ export class McpServer {
           };
       }
     } catch (err) {
+      if (err instanceof MdGraphError) {
+        return {
+          jsonrpc: '2.0',
+          id: request.id ?? null,
+          error: {
+            code: -32603,
+            message: err.toText(),
+          },
+        };
+      }
       return {
         jsonrpc: '2.0',
         id: request.id ?? null,
         error: {
           code: -32603,
-          message: `Internal error: ${err instanceof Error ? err.message : String(err)}`,
+          message: `内部错误: ${err instanceof Error ? err.message : String(err)}`,
         },
       };
     }
@@ -145,7 +159,7 @@ export class McpServer {
       jsonrpc: '2.0',
       id: request.id ?? null,
       result: {
-        protocolVersion: '0.1.0',
+        protocolVersion: '2024-11-05',
         capabilities: {
           tools: {
             listChanged: false,
@@ -216,6 +230,13 @@ export class McpServer {
         result,
       };
     } catch (err) {
+      if (err instanceof MdGraphError) {
+        return {
+          jsonrpc: '2.0',
+          id: request.id ?? null,
+          error: { code: -32603, message: err.toText() },
+        };
+      }
       const message = err instanceof Error ? err.message : String(err);
       // 参数验证错误使用 -32602 (Invalid params)
       const code = message.includes('Missing required parameter') ? -32602 : -32603;
@@ -233,14 +254,7 @@ export class McpServer {
 
   /** 调用 md_status 工具 */
   private async callStatus(): Promise<ToolResult> {
-    const status = await this.graph.status();
-    const text = this.templateEngine.renderTemplate('md_status', {
-      totalFiles: status.totalFiles,
-      totalNodes: status.totalNodes,
-      totalEdges: status.totalEdges,
-      lastIndexedAt: status.lastIndexedAt,
-      stale: status.stale,
-    });
+    const text = await this.graph.renderStatus();
     return {
       content: [{ type: 'text', text }],
     };
@@ -255,19 +269,10 @@ export class McpServer {
 
     const maxResults = (args.maxResults as number) ?? 10;
     const offset = (args.offset as number) ?? 0;
+    const type = args.type as 'heading' | 'paragraph' | 'code_block' | undefined;
+    const file = args.file as string | undefined;
 
-    const searchResult = await this.graph.search(query, { maxResults, offset });
-
-    const text = this.templateEngine.renderTemplate('md_search', {
-      query,
-      totalResults: searchResult.totalResults,
-      results: searchResult.results.map(r => ({
-        filePath: r.filePath || '',
-        headingPath: r.headingPath || '',
-        snippet: r.snippet || '',
-        score: r.score || 0,
-      })),
-    });
+    const text = await this.graph.renderSearch(query, { maxResults, offset, type, file });
 
     return {
       content: [{ type: 'text', text }],
@@ -277,10 +282,11 @@ export class McpServer {
   /** 调用 md_navigate 工具 */
   private async callNavigate(args: Record<string, unknown>): Promise<ToolResult> {
     const nodeId = args.nodeId as number | undefined;
+    const path = args.path as string | undefined;
     const direction = args.direction as string | undefined;
 
-    if (nodeId === undefined) {
-      throw new Error('Missing required parameter: nodeId');
+    if (nodeId === undefined && !path) {
+      throw new Error('Missing required parameter: need nodeId or path');
     }
     if (!direction) {
       throw new Error('Missing required parameter: direction');
@@ -288,18 +294,10 @@ export class McpServer {
 
     const depth = (args.depth as number) ?? 1;
 
-    const navResult = await this.graph.navigate(nodeId, direction as 'inbound' | 'outbound' | 'impact', depth);
-
-    const text = this.templateEngine.renderTemplate('md_navigate', {
-      sourcePath: navResult.sourcePath,
-      topic: navResult.topic,
-      direction: navResult.direction,
-      links: navResult.links.map(l => ({
-        targetPath: l.targetPath || '',
-        linkText: l.linkText || '',
-        status: l.status || '',
-      })),
-    });
+    // 优先使用 path，fallback 到 nodeId
+    const text = path
+      ? await this.graph.renderNavigate(path, direction, depth)
+      : await this.graph.renderNavigate(nodeId as number, direction, depth);
 
     return {
       content: [{ type: 'text', text }],

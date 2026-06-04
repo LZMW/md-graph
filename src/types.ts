@@ -77,12 +77,35 @@ export interface ParsedDocument {
 }
 
 // ---------------------------------------------------------------------------
+// 错误处理
+// ---------------------------------------------------------------------------
+
+export class MdGraphError extends Error {
+  constructor(
+    public code: string,
+    message: string,
+    public cause_detail: string = '',
+    public fix: string = '',
+    public recoverable: boolean = true
+  ) {
+    super(message);
+    this.name = 'MdGraphError';
+  }
+
+  toText(): string {
+    return `问题: ${this.message}\n原因: ${this.cause_detail}\n修复: ${this.fix}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 搜索结果
 // ---------------------------------------------------------------------------
 export interface SearchOptions {
     maxResults?: number;   // default: 10, max: 50
     offset?: number;       // default: 0
     fileGlob?: string;
+    type?: 'heading' | 'paragraph' | 'code_block';
+    file?: string;         // 按文件路径精确过滤
 }
 
 export interface SearchResultItem {
@@ -135,6 +158,7 @@ export interface NavResult {
     depth: number;
     totalLinks: number;
     links: NavLink[];
+    truncated?: boolean;
     stale: boolean;
     staleFileCount: number;
     lastIndexedAt: string;
@@ -185,6 +209,32 @@ export interface ChangeDetail {
     boldTerms?: string[];
     italicTerms?: string[];
     codeTerms?: string[];
+}
+
+// ---------------------------------------------------------------------------
+// 变更批次类型（供 template.ts / getChangeBatches 使用）
+// ---------------------------------------------------------------------------
+export interface ChangeItem {
+  fileName: string;
+  type: 'added' | 'modified' | 'deleted';
+  path: string;
+  lineRanges: string;
+  headingPath: string;
+  keywords_line: string;
+  related_line: string;
+}
+
+export interface Batch {
+  index: number;
+  timeWindow: string;
+  fileCount: number;
+  files: ChangeItem[];
+}
+
+export interface ChangeBatchResult {
+  batches: Batch[];
+  batchCount: number;
+  search_hint: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +314,7 @@ export interface NodeInsert {
     ordinal: number;
     heading_level?: number | null;
     heading_path?: string | null;
+    line_ranges?: string | null;
 }
 
 export interface EdgeInsert {

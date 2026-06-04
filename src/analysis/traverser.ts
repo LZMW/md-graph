@@ -7,6 +7,12 @@ import { SqliteDbAdapter } from '../storage/database.js';
 import type { NavResult, NavLink, Direction, NodeRecord } from '../types.js';
 
 // =============================================================================
+// 安全保护常量
+// =============================================================================
+const MAX_VISITED = 2000;
+const MAX_DEPTH = 30;
+
+// =============================================================================
 // Traverser
 // =============================================================================
 export class Traverser {
@@ -21,6 +27,7 @@ export class Traverser {
     depth: number = 1,
   ): Promise<NavResult> {
     const startTime = Date.now();
+    const safeDepth = Math.min(depth, MAX_DEPTH);
 
     // 检查节点是否存在
     const sourceNode = this.db.getNodeById(nodeId);
@@ -35,7 +42,7 @@ export class Traverser {
         sourceFileName: '',
         topic: '',
         direction,
-        depth,
+        depth: safeDepth,
         totalLinks: 0,
         links: [],
         stale: staleInfo.stale,
@@ -55,13 +62,20 @@ export class Traverser {
     const topic = sourceNode.heading_path || content?.slice(0, 100) || sourceFileName;
 
     let links: NavLink[] = [];
+    let truncated = false;
 
     if (direction === 'outbound') {
-      links = await this.navigateOutbound(nodeId, depth);
+      const result = await this.navigateOutbound(nodeId, safeDepth);
+      links = result.links;
+      truncated = result.truncated;
     } else if (direction === 'inbound') {
-      links = await this.navigateInbound(nodeId, depth);
+      const result = await this.navigateInbound(nodeId, safeDepth);
+      links = result.links;
+      truncated = result.truncated;
     } else if (direction === 'impact') {
-      links = await this.navigateImpact(nodeId, depth);
+      const result = await this.navigateImpact(nodeId, safeDepth);
+      links = result.links;
+      truncated = result.truncated;
     }
 
     const staleInfo = this.db.getStaleInfo();
@@ -73,9 +87,10 @@ export class Traverser {
       sourceFileName,
       topic,
       direction,
-      depth,
+      depth: safeDepth,
       totalLinks: links.length,
       links,
+      truncated: truncated || undefined,
       stale: staleInfo.stale,
       staleFileCount: staleInfo.staleFileCount,
       lastIndexedAt: staleInfo.lastIndexedAt,
@@ -91,34 +106,45 @@ export class Traverser {
   private async navigateOutbound(
     nodeId: number,
     maxDepth: number,
-  ): Promise<NavLink[]> {
-    // 使用单层 BFS，每层采集 edges
+  ): Promise<{ links: NavLink[]; truncated: boolean }> {
     const edges = this.db.getBFSOutbound([nodeId], maxDepth);
-    return this.edgesToNavLinks(edges);
+    if (edges.length > MAX_VISITED) {
+      return {
+        links: this.edgesToNavLinks(edges.slice(0, MAX_VISITED)),
+        truncated: true,
+      };
+    }
+    return { links: this.edgesToNavLinks(edges), truncated: false };
   }
 
   /** BFS 入链导航 */
   private async navigateInbound(
     nodeId: number,
     maxDepth: number,
-  ): Promise<NavLink[]> {
+  ): Promise<{ links: NavLink[]; truncated: boolean }> {
     const edges = this.db.getBFSInbound([nodeId], maxDepth);
-    return this.edgesToNavLinks(edges);
+    if (edges.length > MAX_VISITED) {
+      return {
+        links: this.edgesToNavLinks(edges.slice(0, MAX_VISITED)),
+        truncated: true,
+      };
+    }
+    return { links: this.edgesToNavLinks(edges), truncated: false };
   }
 
   /** Impact 导航 = inbound + outbound 合并去重 */
   private async navigateImpact(
     nodeId: number,
     maxDepth: number,
-  ): Promise<NavLink[]> {
-    const outboundLinks = await this.navigateOutbound(nodeId, maxDepth);
-    const inboundLinks = await this.navigateInbound(nodeId, maxDepth);
+  ): Promise<{ links: NavLink[]; truncated: boolean }> {
+    const outboundResult = await this.navigateOutbound(nodeId, maxDepth);
+    const inboundResult = await this.navigateInbound(nodeId, maxDepth);
 
     // 合并去重
     const seen = new Set<string>();
     const combined: NavLink[] = [];
 
-    for (const link of [...outboundLinks, ...inboundLinks]) {
+    for (const link of [...outboundResult.links, ...inboundResult.links]) {
       const key = `${link.linkText}|${link.targetPath}|${link.status}`;
       if (!seen.has(key)) {
         seen.add(key);
@@ -126,7 +152,10 @@ export class Traverser {
       }
     }
 
-    return combined;
+    return {
+      links: combined,
+      truncated: outboundResult.truncated || inboundResult.truncated,
+    };
   }
 
   /** 将 EdgeRecord 转为 NavLink[] */

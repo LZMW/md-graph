@@ -55,7 +55,7 @@ export class Watcher {
     if (this.watcher) return;
 
     this.watcher = watch(this.rootPath, {
-      ignored: /(^|[/\\])\.(?!md$)/, // 忽略非 .md 文件的隐藏文件和目录
+      ignored: [/(^|[/\\])\.(?!md$)/, '**/node_modules/**'], // 忽略非 .md 隐藏文件和 node_modules
       persistent: true,
       ignoreInitial: true,
       awaitWriteFinish: {

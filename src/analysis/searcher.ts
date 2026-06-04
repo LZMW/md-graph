@@ -31,6 +31,8 @@ export class Searcher {
       maxResults: options?.maxResults ?? 10,
       offset: options?.offset ?? 0,
       fileGlob: options?.fileGlob,
+      type: options?.type,
+      file: options?.file,
     });
 
     const results: SearchResultItem[] = rows.map((row) => {

@@ -1,17 +1,22 @@
 {
   "name": "md-graph",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "bin": {
     "md-graph": "./dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist/",
+    "README.md"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"require('fs').cpSync('src/storage/schema.sql','dist/storage/schema.sql')\"",
     "start:mcp": "node dist/api/mcp-server.js",
-    "dev": "tsx src/api/mcp-server.ts"
+    "dev": "tsx src/api/mcp-server.ts",
+    "cli": "node dist/cli.js",
+    "test": "npx tsx --test"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",

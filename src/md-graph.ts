@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import { FileStore } from './storage/filestore.js';
 import { SqliteDbAdapter } from './storage/database.js';
 import { ParserRegistry, registerDefaultParsers } from './analysis/parser/index.js';
+import { TemplateEngine } from './api/template.js';
 import { Indexer } from './analysis/indexer.js';
 import { Searcher } from './analysis/searcher.js';
 import { Traverser } from './analysis/traverser.js';
@@ -59,6 +60,7 @@ export class MdGraph {
   private searcher!: Searcher;
   private traverser!: Traverser;
   private watcher!: Watcher;
+  private template!: TemplateEngine;
   private initialized = false;
 
   constructor(rootPath: string, options?: MdGraphOptions) {
@@ -92,6 +94,9 @@ export class MdGraph {
     this.indexer = new Indexer(this.fileStore, this.db, ParserRegistry);
     this.searcher = new Searcher(this.db);
     this.traverser = new Traverser(this.db);
+
+    // 初始化模板引擎
+    this.template = new TemplateEngine();
 
     // 初始化 watcher
     this.watcher = new Watcher(this.rootPath, this.indexer);
@@ -170,6 +175,94 @@ export class MdGraph {
     }
     this.initialized = false;
     this.log('MdGraph 已关闭');
+  }
+
+  // =========================================================================
+  // renderStatus — 渲染状态文本（包含变更批次）
+  // =========================================================================
+  async renderStatus(): Promise<string> {
+    await this.ensureInitialized();
+    const status = await this.status();
+
+    // 尝试从数据库中获取变更批次
+    let changeBatch;
+    try {
+      changeBatch = this.db.getChangeBatches();
+    } catch {
+      changeBatch = { batches: [], batchCount: 0, search_hint: '' };
+    }
+
+    return this.template.renderStatus({
+      ...changeBatch,
+      search_hint: `试试搜索关键词，或使用 navigate 查看文件关系。`,
+    });
+  }
+
+  // =========================================================================
+  // renderSearch — 渲染搜索结果文本
+  // =========================================================================
+  async renderSearch(query: string, options?: SearchOptions): Promise<string> {
+    await this.ensureInitialized();
+    const searchResult = await this.search(query, options);
+
+    return this.template.renderSearch({
+      query,
+      totalResults: searchResult.totalResults,
+      results: searchResult.results.map((r) => ({
+        fileName: r.fileName,
+        filePath: r.filePath,
+        headingPath: r.headingPath,
+        snippet: r.snippet,
+        lineRanges: r.lineRanges,
+      })),
+      search_hint: `试试换个关键词搜索，或使用 status 查看知识库状态。`,
+    });
+  }
+
+  // =========================================================================
+  // renderNavigate — 渲染导航结果文本
+  // =========================================================================
+  async renderNavigate(
+    nodeIdOrPath: number | string,
+    direction: string,
+    depth: number = 1,
+  ): Promise<string> {
+    await this.ensureInitialized();
+    let nodeId: number;
+
+    if (typeof nodeIdOrPath === 'number') {
+      nodeId = nodeIdOrPath;
+    } else {
+      // 通过文件路径查找 nodeId
+      const fileRecord = this.db.getFileByPath(nodeIdOrPath);
+      if (!fileRecord) {
+        return `## 文件关系: ${nodeIdOrPath}\n\n未找到文件。请检查路径是否正确。`;
+      }
+      const nodes = this.db.getNodesByFile(fileRecord.id);
+      if (nodes.length === 0) {
+        return `## 文件关系: ${nodeIdOrPath}\n\n文件中未找到可导航的节点。`;
+      }
+      nodeId = nodes[0].id;
+    }
+
+    const navResult = await this.navigate(
+      nodeId,
+      direction as 'inbound' | 'outbound' | 'impact',
+      depth,
+    );
+
+    return this.template.renderNavigate({
+      sourcePath: navResult.sourcePath,
+      topic: navResult.topic,
+      direction: navResult.direction,
+      totalLinks: navResult.totalLinks,
+      links: navResult.links.map((l) => ({
+        linkText: l.linkText,
+        targetPath: l.targetPath,
+        status: l.status,
+      })),
+      search_hint: `试试换个方向导航，或使用 search 搜索相关内容。`,
+    });
   }
 
   // =========================================================================
