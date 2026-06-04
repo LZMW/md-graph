@@ -317,9 +317,17 @@ export class Indexer {
     } else {
       const result = this.db.insertFile(fileData);
       fileId = result.id;
+      // 新文件所有节点标记为 added
+      const newFileChanges: ChangeDetail[] = parsed.nodes.map(n => ({
+        type: 'added' as const,
+        nodeId: n.id ?? 0,
+        headingPath: n.headingPath || '',
+        lineRanges: n.lineStart ? `${n.lineStart}-${n.lineEnd ?? n.lineStart}` : '',
+      }));
       this.db.updateFile(fileId, {
         node_count: parsed.nodes.length,
         indexed_at: new Date().toISOString(),
+        last_change_details: JSON.stringify(newFileChanges),
       });
     }
 

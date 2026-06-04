@@ -502,7 +502,7 @@ export class SqliteDbAdapter {
       return { batches: [], batchCount: 0, search_hint: '暂无变更记录。' };
     }
 
-    // 解析每个文件的变更记录并收集时间戳
+    // 解析变更记录，按文件合并（同文件多变更聚合为一条）
     const items: Array<{
       time: number;
       fileName: string;
@@ -512,6 +512,7 @@ export class SqliteDbAdapter {
       headingPath: string;
       keywords_line: string;
       related_line: string;
+      changeCount: number;
     }> = [];
 
     for (const file of files) {
@@ -522,22 +523,65 @@ export class SqliteDbAdapter {
       try {
         details = JSON.parse(file.last_change_details);
       } catch {
-        // ignore parse errors
+        continue;
       }
 
+      if (details.length === 0) continue;
+
       const fileName = file.path.replace(/\\/g, '/').split('/').pop() || file.path;
+
+      // 确定主变更类型（优先 modified > added > deleted）
+      const types = new Set(details.map(d => d.type));
+      const mainType = types.has('modified') ? 'modified'
+        : types.has('added') ? 'added'
+        : 'deleted';
+
+      // 聚合行号区间（去重，取前 5 个，超出标 …）
+      const lrSet = new Set<string>();
       for (const d of details) {
-        items.push({
-          time: timeVal,
-          fileName,
-          type: d.type || 'modified',
-          path: file.path,
-          lineRanges: d.lineRanges || '',
-          headingPath: d.headingPath || '',
-          keywords_line: d.boldTerms?.length ? `关键词: ${d.boldTerms.join(', ')}` : '',
-          related_line: '',
-        });
+        if (d.lineRanges) lrSet.add(d.lineRanges);
       }
+      const lrList = [...lrSet].filter(Boolean);
+      const lineRanges = lrList.length <= 5
+        ? lrList.join(', ')
+        : lrList.slice(0, 5).join(', ') + ` …等 ${lrList.length} 处`;
+
+      // 聚合标题路径（去重，取前 5 个，超出标 …）
+      const hpSet = new Set<string>();
+      for (const d of details) {
+        if (d.headingPath) hpSet.add(d.headingPath);
+      }
+      const hpList = [...hpSet].filter(Boolean);
+      const headingPath = hpList.length <= 5
+        ? hpList.join('; ')
+        : hpList.slice(0, 5).join('; ') + ` …等 ${hpList.length} 处`;
+
+      // 聚合关键词
+      const allBold = new Set<string>();
+      const allItalic = new Set<string>();
+      const allCode = new Set<string>();
+      for (const d of details) {
+        d.boldTerms?.forEach(t => allBold.add(t));
+        d.italicTerms?.forEach(t => allItalic.add(t));
+        d.codeTerms?.forEach(t => allCode.add(t));
+      }
+      const kwParts: string[] = [];
+      if (allBold.size > 0) kwParts.push(`粗体: ${[...allBold].join(', ')}`);
+      if (allItalic.size > 0) kwParts.push(`斜体: ${[...allItalic].join(', ')}`);
+      if (allCode.size > 0) kwParts.push(`代码: ${[...allCode].join(', ')}`);
+      const keywords_line = kwParts.length > 0 ? `关键词: ${kwParts.join('; ')}` : '';
+
+      items.push({
+        time: timeVal,
+        fileName,
+        type: mainType,
+        path: file.path,
+        lineRanges,
+        headingPath,
+        keywords_line,
+        related_line: '',
+        changeCount: details.length,
+      });
     }
 
     // 按时间倒序排列
@@ -584,6 +628,7 @@ export class SqliteDbAdapter {
           headingPath: g.headingPath,
           keywords_line: g.keywords_line,
           related_line: g.related_line,
+          changeCount: g.changeCount,
         })),
       });
     }

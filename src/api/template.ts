@@ -44,9 +44,12 @@ export class TemplateEngine {
           const hp = f['headingPath'] as string ?? '';
           const kl = f['keywords_line'] as string ?? '';
           const rl = f['related_line'] as string ?? '';
+          const cc = f['changeCount'] as number ?? 0;
 
-          result += `- **${fn}** (${tp}, ${p})\n`;
-          result += `  行 ${lr} · ${hp}\n`;
+          const ccSuffix = cc > 1 ? ` · ${cc} 处变更` : '';
+          result += `- **${fn}** (${tp}, ${p})${ccSuffix}\n`;
+          if (lr) result += `  行 ${lr}\n`;
+          if (hp) result += `  涉及: ${hp}\n`;
           if (kl) result += `  ${kl}\n`;
           if (rl) result += `  ${rl}\n`;
         }

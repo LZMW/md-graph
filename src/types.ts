@@ -233,6 +233,7 @@ export interface ChangeItem {
   headingPath: string;
   keywords_line: string;
   related_line: string;
+  changeCount?: number;
 }
 
 export interface Batch {
