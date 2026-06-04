@@ -199,8 +199,17 @@ export class McpServer {
     }
 
     const toolName = params.name as string;
-    // 兼容两种传参格式：{ arguments: {...} } 和顶层 {...}
-    const args = (params.arguments as Record<string, unknown>) ?? params;
+    // 兼容三种传参格式：arguments 是对象、arguments 是 JSON 字符串、顶层平铺
+    let args: Record<string, unknown> = {};
+    if (params.arguments) {
+      if (typeof params.arguments === 'string') {
+        try { args = JSON.parse(params.arguments); } catch { args = {}; }
+      } else {
+        args = params.arguments as Record<string, unknown>;
+      }
+    } else {
+      args = params as Record<string, unknown>;
+    }
 
     try {
       let result: ToolResult;
