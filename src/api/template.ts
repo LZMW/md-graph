@@ -13,19 +13,23 @@ function extractKeywordsFromFiles(files: Array<Record<string, unknown>>): string
   const seen = new Set<string>();
   const keywords: string[] = [];
   for (const f of files) {
-    const hp = (f['headingPath'] as string) ?? '';
-    // headingPath 格式: "公共前缀 > 子节点1(+N), 子节点2"
-    const parts = hp.split(' > ');
-    const lastPart = parts[parts.length - 1] || hp;
-    for (const segment of lastPart.split(', ')) {
-      let name = segment.replace(/\s*\(\+?\d+\)\s*/g, '').trim();
-      // 截断过长的标题名（>20 字符），取有意义的前面部分
-      if (name.length > 20) {
-        const sep = name.indexOf(' — ');
-        name = sep > 0 ? name.slice(0, sep) : name.slice(0, 18) + '…';
+    // 优先从 keywords_line 提取（已按频次排序）
+    const kl = (f['keywords_line'] as string) ?? '';
+    if (kl) {
+      for (const token of kl.split(', ')) {
+        const name = token.replace(/\s*\(×?\d+\)\s*/g, '').trim();
+        if (name && name.length > 1 && !seen.has(name)) {
+          seen.add(name);
+          keywords.push(name);
+        }
       }
-      if (name && name.length > 1 && !name.startsWith('…')) {
-        if (!seen.has(name)) {
+    }
+    // 补充从 headingPath 提取
+    const hp = (f['headingPath'] as string) ?? '';
+    if (hp) {
+      for (const seg of hp.split(' > ')) {
+        const name = seg.replace(/\s*\(.*?\)\s*/g, '').trim();
+        if (name && name.length > 1 && !seen.has(name) && !name.startsWith('…')) {
           seen.add(name);
           keywords.push(name);
         }
@@ -76,8 +80,8 @@ export class TemplateEngine {
           const ccSuffix = cc > 1 ? ` · ${cc} 处变更` : '';
           result += `- **${fn}** (${tp}, ${p})${ccSuffix}\n`;
           if (lr) result += `  行 ${lr}\n`;
+          if (kl) result += `  关键词: ${kl}\n`;
           if (hp) result += `  涉及: ${hp}\n`;
-          if (kl) result += `  ${kl}\n`;
           if (rl) result += `  ${rl}\n`;
         }
       }

@@ -176,7 +176,7 @@ export class Indexer {
   // =========================================================================
   computeChanges(
     oldNodes: { heading_path?: string | null; line_ranges?: string | null }[],
-    newNodes: { headingPath?: string; lineStart?: number; lineEnd?: number }[],
+    newNodes: { headingPath?: string; lineStart?: number; lineEnd?: number; boldTerms?: string[]; italicTerms?: string[]; codeTerms?: string[] }[],
   ): ChangeDetail[] {
     const changes: ChangeDetail[] = [];
 
@@ -186,7 +186,7 @@ export class Indexer {
       oldMap.set(key, n);
     }
 
-    const newMap = new Map<string, { headingPath?: string; lineStart?: number; lineEnd?: number }>();
+    const newMap = new Map<string, { headingPath?: string; lineStart?: number; lineEnd?: number; boldTerms?: string[]; italicTerms?: string[]; codeTerms?: string[] }>();
     for (const n of newNodes) {
       const key = n.headingPath || '';
       newMap.set(key, n);
@@ -196,15 +196,16 @@ export class Indexer {
     for (const [key, newNode] of newMap) {
       const oldNode = oldMap.get(key);
       if (!oldNode) {
-        // 新增节点
         changes.push({
           type: 'added',
-          nodeId: 0, // 暂未分配 DB id
+          nodeId: 0,
           headingPath: key,
           lineRanges: newNode.lineStart ? `${newNode.lineStart}-${newNode.lineEnd ?? newNode.lineStart}` : '',
+          boldTerms: newNode.boldTerms,
+          italicTerms: newNode.italicTerms,
+          codeTerms: newNode.codeTerms,
         });
       } else {
-        // 检查是否修改（line_ranges 变化即为修改）
         const oldRange = oldNode.line_ranges || '';
         const newRange = newNode.lineStart ? `${newNode.lineStart}-${newNode.lineEnd ?? newNode.lineStart}` : '';
         if (oldRange !== newRange) {
@@ -213,6 +214,9 @@ export class Indexer {
             nodeId: 0,
             headingPath: key,
             lineRanges: newRange,
+            boldTerms: newNode.boldTerms,
+            italicTerms: newNode.italicTerms,
+            codeTerms: newNode.codeTerms,
           });
         }
       }
@@ -299,7 +303,13 @@ export class Indexer {
       const oldNodes = this.db.getNodesByFile(existingFile.id);
       const changes = this.computeChanges(
         oldNodes.map(n => ({ heading_path: n.heading_path, line_ranges: n.line_ranges })),
-        parsed.nodes.map(n => ({ headingPath: n.headingPath, lineStart: n.lineStart, lineEnd: n.lineEnd })),
+        parsed.nodes.map(n => {
+          let inlineTerms: { boldTerms?: string[]; italicTerms?: string[]; codeTerms?: string[] } = {};
+          if (n.inlineTokens) {
+            try { inlineTerms = JSON.parse(n.inlineTokens); } catch { /* ignore */ }
+          }
+          return { headingPath: n.headingPath, lineStart: n.lineStart, lineEnd: n.lineEnd, ...inlineTerms };
+        }),
       );
       const changeDetailsJson = changes.length > 0 ? JSON.stringify(changes) : null;
 
@@ -317,13 +327,20 @@ export class Indexer {
     } else {
       const result = this.db.insertFile(fileData);
       fileId = result.id;
-      // 新文件所有节点标记为 added
-      const newFileChanges: ChangeDetail[] = parsed.nodes.map(n => ({
-        type: 'added' as const,
-        nodeId: n.id ?? 0,
-        headingPath: n.headingPath || '',
-        lineRanges: n.lineStart ? `${n.lineStart}-${n.lineEnd ?? n.lineStart}` : '',
-      }));
+      // 新文件所有节点标记为 added，含 inline token 信息
+      const newFileChanges: ChangeDetail[] = parsed.nodes.map(n => {
+        let inlineTerms: { boldTerms?: string[]; italicTerms?: string[]; codeTerms?: string[] } = {};
+        if (n.inlineTokens) {
+          try { inlineTerms = JSON.parse(n.inlineTokens); } catch { /* ignore */ }
+        }
+        return {
+          type: 'added' as const,
+          nodeId: n.id ?? 0,
+          headingPath: n.headingPath || '',
+          lineRanges: n.lineStart ? `${n.lineStart}-${n.lineEnd ?? n.lineStart}` : '',
+          ...inlineTerms,
+        };
+      });
       this.db.updateFile(fileId, {
         node_count: parsed.nodes.length,
         indexed_at: new Date().toISOString(),

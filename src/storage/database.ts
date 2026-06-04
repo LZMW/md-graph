@@ -680,28 +680,46 @@ export class SqliteDbAdapter {
         ? lrList.join(', ')
         : lrList.slice(0, 5).join(', ') + ` …等 ${lrList.length} 处`;
 
-      // 聚合标题路径：提取公共前缀，树形压缩展示
-      const hpSet = new Set<string>();
+      // 聚合标题路径：取重复度最高的单个 heading
+      const hpFreq = new Map<string, number>();
       for (const d of details) {
-        if (d.headingPath) hpSet.add(d.headingPath);
+        if (d.headingPath) hpFreq.set(d.headingPath, (hpFreq.get(d.headingPath) || 0) + 1);
       }
-      const hpList = [...hpSet].filter(Boolean);
-      const headingPath = compactHeadingPaths(hpList);
+      let bestHeading = '';
+      let bestHpFreq = 0;
+      for (const [hp, freq] of hpFreq) {
+        if (freq > bestHpFreq) { bestHpFreq = freq; bestHeading = hp; }
+      }
+      // 所有 heading 都只出现一次时，用最长公共前缀
+      const headingPath = bestHpFreq > 1
+        ? bestHeading
+        : compactHeadingPaths([...hpFreq.keys()]);
 
-      // 聚合关键词
-      const allBold = new Set<string>();
-      const allItalic = new Set<string>();
-      const allCode = new Set<string>();
+      // 聚合关键词：bold/italic/code 混排，频次降序，同频按权重（bold>italic>code）
+      const termInfo = new Map<string, { freq: number; weight: number }>();
       for (const d of details) {
-        d.boldTerms?.forEach(t => allBold.add(t));
-        d.italicTerms?.forEach(t => allItalic.add(t));
-        d.codeTerms?.forEach(t => allCode.add(t));
+        d.boldTerms?.forEach(t => {
+          const info = termInfo.get(t) || { freq: 0, weight: 0 };
+          info.freq++; info.weight = Math.max(info.weight, 3);
+          termInfo.set(t, info);
+        });
+        d.italicTerms?.forEach(t => {
+          const info = termInfo.get(t) || { freq: 0, weight: 0 };
+          info.freq++; info.weight = Math.max(info.weight, 2);
+          termInfo.set(t, info);
+        });
+        d.codeTerms?.forEach(t => {
+          const info = termInfo.get(t) || { freq: 0, weight: 0 };
+          info.freq++; info.weight = Math.max(info.weight, 1);
+          termInfo.set(t, info);
+        });
       }
-      const kwParts: string[] = [];
-      if (allBold.size > 0) kwParts.push(`粗体: ${[...allBold].join(', ')}`);
-      if (allItalic.size > 0) kwParts.push(`斜体: ${[...allItalic].join(', ')}`);
-      if (allCode.size > 0) kwParts.push(`代码: ${[...allCode].join(', ')}`);
-      const keywords_line = kwParts.length > 0 ? `关键词: ${kwParts.join('; ')}` : '';
+      const sorted = [...termInfo.entries()]
+        .sort((a, b) => b[1].freq - a[1].freq || b[1].weight - a[1].weight);
+      const topTerms = sorted.slice(0, 8);
+      const keywords_line = topTerms.length > 0
+        ? topTerms.map(([t, info]) => info.freq > 1 ? `${t}(×${info.freq})` : t).join(', ')
+        : '';
 
       items.push({
         time: timeVal,
