@@ -137,8 +137,9 @@ export class FileStore {
     }
 
     for (const entry of entries) {
-      // 忽略隐藏文件和隐藏目录和 node_modules
+      // 忽略隐藏文件/目录、node_modules 和常见构建/依赖目录
       if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+      if (entry.name === 'dist' || entry.name === 'build' || entry.name === 'target' || entry.name === '.next' || entry.name === 'vendor' || entry.name === 'venv') continue;
 
       const fullPath = path.join(dirPath, entry.name);
       const relPath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;

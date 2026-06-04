@@ -4,7 +4,7 @@
 // 使用标准 JSON-RPC 协议手动实现 MCP 服务器
 // 提供 3 个工具: md_status, md_search, md_navigate
 // =============================================================================
-import { MdGraphError } from '../types.js';
+import { ErrorCodes, MdGraphError } from '../types.js';
 import { TemplateEngine } from './template.js';
 import { createServerInstructions, getToolDefinitions } from './server-instructions.js';
 
@@ -230,20 +230,12 @@ export class McpServer {
         result,
       };
     } catch (err) {
-      if (err instanceof MdGraphError) {
-        return {
-          jsonrpc: '2.0',
-          id: request.id ?? null,
-          error: { code: -32603, message: err.toText() },
-        };
-      }
-      const message = err instanceof Error ? err.message : String(err);
-      // 参数验证错误使用 -32602 (Invalid params)
-      const code = message.includes('Missing required parameter') ? -32602 : -32603;
+      // 返回 content-level ErrorResponse，非 JSON-RPC 协议错误（裁决 #9）
+      const errorResult = this.makeErrorResult(err);
       return {
         jsonrpc: '2.0',
         id: request.id ?? null,
-        error: { code, message },
+        result: errorResult,
       };
     }
   }
@@ -252,10 +244,41 @@ export class McpServer {
   // 内部方法 — 工具调用
   // =========================================================================
 
-  /** 无项目时返回友好提示 */
+  /** 无项目时返回结构化 ErrorResponse */
   private noProject(): ToolResult {
+    return this.errorResult(
+      ErrorCodes.INDEX_NOT_INITIALIZED,
+      '索引尚未初始化，无可用数据。',
+      '未找到 SQLite 索引。MCP 服务器已启动但从未调用 init。',
+      '请在有 Markdown 文档的项目目录下运行 `md-graph init` 创建索引。',
+      true,
+    );
+  }
+
+  /** 将错误转为 content-level ErrorResponse（裁决 #9） */
+  private makeErrorResult(err: unknown): ToolResult {
+    if (err instanceof MdGraphError) {
+      return this.errorResult(err.code, err.message, err.cause, err.fix, err.recoverable);
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    const code = message.includes('Missing required parameter')
+      ? ErrorCodes.INVALID_PARAMETER
+      : ErrorCodes.INTERNAL_ERROR;
+    return this.errorResult(code, message, '', '', code === ErrorCodes.INVALID_PARAMETER);
+  }
+
+  /** 构建结构化 ErrorResponse */
+  private errorResult(
+    code: string,
+    message: string,
+    cause: string,
+    fix: string,
+    recoverable: boolean,
+  ): ToolResult {
+    const text = `${message}\n原因: ${cause}\n修复: ${fix}`;
     return {
-      content: [{ type: 'text', text: '## md-graph 未初始化\n\n当前项目尚未运行 `md-graph init`。请在有 Markdown 文档的项目目录下运行：\n\n```bash\ncd /path/to/your/project\nmd-graph init\n```\n\n之后再重新连接 MCP 服务器。' }],
+      content: [{ type: 'text', text }],
+      isError: true,
     };
   }
 

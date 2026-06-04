@@ -4,20 +4,31 @@
 // 依赖: SqliteDbAdapter
 // =============================================================================
 import { SqliteDbAdapter } from '../storage/database.js';
+import { checkStaleness, mergeStaleness } from '../storage/staleness.js';
 import type { SearchResult, SearchResultItem, SearchOptions } from '../types.js';
 
 // =============================================================================
 // Searcher
 // =============================================================================
 export class Searcher {
-  constructor(private readonly db: SqliteDbAdapter) {}
+  private projectRoot: string;
+
+  constructor(
+    private readonly db: SqliteDbAdapter,
+    projectRoot: string,
+  ) {
+    this.projectRoot = projectRoot;
+  }
 
   // =========================================================================
   // search — 执行全文搜索
   // =========================================================================
   async search(query: string, options?: SearchOptions): Promise<SearchResult> {
     if (!query || !query.trim()) {
-      const staleInfo = this.db.getStaleInfo();
+      const staleInfo = mergeStaleness(
+        checkStaleness(this.projectRoot, this.db.getFileStamps()),
+        this.db.getStaleInfo().lastIndexedAt,
+      );
       return {
         totalResults: 0,
         results: [],
@@ -28,8 +39,7 @@ export class Searcher {
     }
 
     const rows = this.db.searchFTS(query, {
-      maxResults: options?.maxResults ?? 10,
-      offset: options?.offset ?? 0,
+      maxResults: options?.maxResults ?? 20,
       fileGlob: options?.fileGlob,
       type: options?.type,
       file: options?.file,
@@ -56,7 +66,10 @@ export class Searcher {
     // 按 score 降序排序（searchFTS 已排序，做二次确认）
     results.sort((a, b) => b.score - a.score);
 
-    const staleInfo = this.db.getStaleInfo();
+    const staleInfo = mergeStaleness(
+      checkStaleness(this.projectRoot, this.db.getFileStamps()),
+      this.db.getStaleInfo().lastIndexedAt,
+    );
 
     return {
       totalResults: results.length,

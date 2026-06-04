@@ -15,7 +15,7 @@ describe('Searcher', () => {
 
   before(() => {
     db = new SqliteDbAdapter(':memory:');
-    searcher = new Searcher(db);
+    searcher = new Searcher(db, '.');
 
     // 准备测试数据
     const file1 = db.insertFile({
@@ -81,7 +81,7 @@ describe('Searcher', () => {
   // 构造函数
   // ---------------------------------------------------------------------------
   it('constructor — 应使用 db 依赖创建 Searcher', () => {
-    const s = new Searcher(db);
+    const s = new Searcher(db, '.');
     assert.ok(s instanceof Searcher);
   });
 
@@ -113,13 +113,11 @@ describe('Searcher', () => {
     assert.ok(result.results.length <= 1);
   });
 
-  it('search — 应支持分页 (offset)', async () => {
-    const first = await searcher.search('TypeScript', { maxResults: 1, offset: 0 });
-    const second = await searcher.search('TypeScript', { maxResults: 1, offset: 1 });
-    if (first.results.length > 0 && second.results.length > 0) {
-      assert.notEqual(first.results[0].id, second.results[0].id,
-        '不同 offset 应返回不同的结果');
-    }
+  it('search — 搜索结果应包含 staleness 信息', async () => {
+    const result = await searcher.search('TypeScript', { maxResults: 1 });
+    assert.ok(typeof result.stale === 'boolean');
+    assert.ok(typeof result.staleFileCount === 'number');
+    assert.ok(typeof result.lastIndexedAt === 'string');
   });
 
   it('search — 应返回按分数降序排列的结果', async () => {

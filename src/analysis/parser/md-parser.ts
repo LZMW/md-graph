@@ -156,7 +156,7 @@ export class MarkdownParser implements DocumentParser {
 
     // 创建 heading 节点
     const node = this.makeNode('heading', {
-      lineStart, lineEnd, state, parentId, content: text,
+      lineStart, lineEnd, state, parentId, content: text, inlineToken: inlineToken,
     });
     node.headingLevel = level;
     node.headingPath = headingPath;
@@ -184,7 +184,7 @@ export class MarkdownParser implements DocumentParser {
     // 创建 paragraph 节点
     const parentId = this.currentParentId(state);
     const node = this.makeNode('paragraph', {
-      lineStart, lineEnd, state, parentId, content: text,
+      lineStart, lineEnd, state, parentId, content: text, inlineToken: inlineToken,
     });
     if (links.length > 0) node.links = links;
     state.nodes.push(node);
@@ -208,7 +208,7 @@ export class MarkdownParser implements DocumentParser {
     const parentId = this.currentParentId(state);
 
     const node = this.makeNode('paragraph', {
-      lineStart, lineEnd, state, parentId, content: text,
+      lineStart, lineEnd, state, parentId, content: text, inlineToken: token,
     });
     if (links.length > 0) node.links = links;
     state.nodes.push(node);
@@ -248,17 +248,19 @@ export class MarkdownParser implements DocumentParser {
 
     // 查找列表项内的第一个 inline token 获取文本内容
     let text = '';
+    let inlineToken: Token | undefined;
     let j = i + 1;
     while (j < tokens.length && tokens[j].type !== 'list_item_close') {
       if (tokens[j].type === 'inline') {
         text = this.extractInlineText(tokens[j]);
+        inlineToken = tokens[j];
         break;
       }
       j++;
     }
 
     const node = this.makeNode('list_item', {
-      lineStart, lineEnd, state, parentId, content: text || undefined,
+      lineStart, lineEnd, state, parentId, content: text || undefined, inlineToken,
     });
     state.nodes.push(node);
 
@@ -313,11 +315,20 @@ export class MarkdownParser implements DocumentParser {
     type: DocNode['type'],
     opts: {
       lineStart: number; lineEnd: number; state: ParseState;
-      parentId: number; content?: string;
+      parentId: number; content?: string; inlineToken?: Token;
     },
   ): DocNode {
     const id = opts.state.nextNodeId++;
     const ordinal = this.nextOrdinal(opts.state, opts.parentId);
+
+    // 提取 inline token 中的 bold/italic/code 关键词
+    let inlineTokens: string | undefined;
+    if (opts.inlineToken) {
+      const terms = this.extractInlineTerms(opts.inlineToken);
+      if (terms.boldTerms.length > 0 || terms.italicTerms.length > 0 || terms.codeTerms.length > 0) {
+        inlineTokens = JSON.stringify(terms);
+      }
+    }
 
     return {
       id,
@@ -332,7 +343,61 @@ export class MarkdownParser implements DocumentParser {
       ordinal,
       parentId: opts.parentId,
       content: opts.content,
+      headingLevel: undefined,
+      headingPath: undefined,
+      inlineTokens,
     };
+  }
+
+  /** 从 markdown-it inline token 中提取 bold/italic/code 关键词 */
+  private extractInlineTerms(token: Token): {
+    boldTerms: string[]; italicTerms: string[]; codeTerms: string[];
+  } {
+    const boldTerms: string[] = [];
+    const italicTerms: string[] = [];
+    const codeTerms: string[] = [];
+
+    if (!token.children) return { boldTerms, italicTerms, codeTerms };
+
+    for (const child of token.children) {
+      switch (child.type) {
+        case 'strong_open':
+          // strong 的文本内容在下一个 text token 中
+          break;
+        case 'em_open':
+          break;
+        case 'code_inline':
+          if (child.content) codeTerms.push(child.content);
+          break;
+        case 'text':
+          // 需要根据上下文判断：检查前一个兄弟 token
+          break;
+      }
+    }
+
+    // 遍历 children 收集标记内容
+    let i = 0;
+    while (i < token.children.length) {
+      const child = token.children[i];
+      if (child.type === 'strong_open') {
+        const textChild = token.children[i + 1];
+        if (textChild && textChild.type === 'text') {
+          boldTerms.push(textChild.content);
+          i += 3; // 跳过 strong_open + text + strong_close
+          continue;
+        }
+      } else if (child.type === 'em_open') {
+        const textChild = token.children[i + 1];
+        if (textChild && textChild.type === 'text') {
+          italicTerms.push(textChild.content);
+          i += 3; // 跳过 em_open + text + em_close
+          continue;
+        }
+      }
+      i++;
+    }
+
+    return { boldTerms, italicTerms, codeTerms };
   }
 
   /** 获取当前上下文的 parentId（最近 heading 或 0=document） */

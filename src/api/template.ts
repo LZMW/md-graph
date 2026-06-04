@@ -1,212 +1,42 @@
 // =============================================================================
 // TemplateEngine — 自然语言模板引擎
-// 支持变量插值、条件块、_next 引导
-// 提供 md_status / md_search / md_navigate 三个预置模板
-// + STATUS / SEARCH / NAVIGATE 三个静态模板
+// 按 DI 规格（architecture-spec/06-mcp-cli-interface.md gen-3）输出
+// 裁决 #11: 空结果自然语言文本
+// ADR-012: _next 【务必】/【不要】引导格式
+// 裁决 #6: staleness 三字段嵌入每个响应末尾
 // =============================================================================
-
-// ---------------------------------------------------------------------------
-// 模板数据接口
-// ---------------------------------------------------------------------------
-export interface TemplateData {
-  [key: string]: unknown;
-}
-
-export interface SearchResultItem {
-  filePath: string;
-  headingPath: string;
-  snippet: string;
-  score: number;
-}
-
-export interface SearchTemplateData extends TemplateData {
-  query: string;
-  totalResults: number;
-  results: SearchResultItem[];
-}
-
-export interface StatusTemplateData extends TemplateData {
-  totalFiles: number;
-  totalNodes: number;
-  totalEdges: number;
-  lastIndexedAt: string;
-}
-
-export interface NavLinkItem {
-  targetPath: string;
-  linkText: string;
-  status: string;
-}
-
-export interface NavigateTemplateData extends TemplateData {
-  sourcePath: string;
-  topic: string;
-  direction: string;
-  links: NavLinkItem[];
-}
-
-// ---------------------------------------------------------------------------
-// 预定义模板
-// ---------------------------------------------------------------------------
-const PREDEFINED_TEMPLATES: Record<string, string> = {
-  md_status: `## 知识库状态
-
-当前索引了 **{{totalFiles}}** 个文件，包含 **{{totalNodes}}** 个节点和 **{{totalEdges}}** 条链接。
-
-{{#if stale}}部分文件可能已过期，建议重新索引。{{/if}}
-{{#unless stale}}索引状态良好，所有文件是最新的。{{/unless}}
-
-最后索引时间: {{lastIndexedAt}}
-
-{{_next "搜索文档":search 关键词}}
-{{_next "查看文件关系":navigate 文件路径}}`,
-
-  md_search: `## 搜索结果: "{{query}}"
-
-找到 **{{totalResults}}** 条匹配结果：
-
-{{#if results}}{{#each results}}
-- {{headingPath}} ({{filePath}})
-  \> {{snippet}}  [分数: {{score}}]
-{{/each}}{{/if}}
-{{#unless results}}未找到匹配内容。{{/unless}}
-
-{{_next "换个关键词搜索":search 新关键词}}
-{{_next "查看知识库状态":status}}`,
-
-  md_navigate: `## 文件关系: {{sourcePath}}
-
-**主题**: {{topic}}
-**方向**: {{direction}}
-
-{{#if links}}**链接列表**:
-{{#each links}}
-- [{{linkText}}]({{targetPath}}) [{{status}}]
-{{/each}}{{/if}}
-{{#unless links}}暂无链接信息。{{/unless}}
-
-{{_next "搜索相关文档":search 关键词}}
-{{_next "返回知识库状态":status}}`,
-};
 
 // =============================================================================
 // TemplateEngine
 // =============================================================================
 export class TemplateEngine {
-  private templates: Map<string, string>;
-
-  constructor() {
-    this.templates = new Map(Object.entries(PREDEFINED_TEMPLATES));
-  }
 
   // =========================================================================
-  // render — 渲染模板字符串
-  // 支持: {{var}} 变量插值, {{#if var}}...{{/if}}, {{#unless var}}...{{/unless}}
-  //       {{#each items}}...{{/each}}, {{_next "label":query}}
-  // =========================================================================
-  render(template: string, data: TemplateData): string {
-    let result = this.renderNextTags(template);
-    result = this.renderEachBlocks(result, data);
-    result = this.renderConditionalBlocks(result, data);
-    result = this.renderVariables(result, data);
-    return result;
-  }
-
-  // =========================================================================
-  // renderTemplate — 使用预定义模板渲染
-  // =========================================================================
-  renderTemplate(templateName: string, data: TemplateData): string {
-    const template = this.templates.get(templateName);
-    if (!template) {
-      throw new Error(`未知模板: ${templateName}`);
-    }
-    return this.render(template, data);
-  }
-
-  // =========================================================================
-  // registerTemplate — 注册自定义模板
-  // =========================================================================
-  registerTemplate(name: string, template: string): void {
-    this.templates.set(name, template);
-  }
-
-  // =========================================================================
-  // 内部渲染方法
-  // =========================================================================
-
-  /** 渲染 {{_next "label":query}} 标签为引导提示 */
-  private renderNextTags(template: string): string {
-    return template.replace(
-      /\{\{_next\s+"([^"]+)"\s*:\s*([^}]+)\}\}/g,
-      (_, label: string, suggestion: string) => {
-        return `\n> 您可以继续查询: **${label}** (\`${suggestion.trim()}\`)\n`;
-      },
-    );
-  }
-
-  /** 渲染 {{#each items}}...{{/each}} 块 */
-  private renderEachBlocks(template: string, data: TemplateData): string {
-    const blockRegex = /\{\{#each\s+(\w+)\}\}([\s\S]*?)\{\{\/each\}\}/g;
-    return template.replace(blockRegex, (_, key: string, content: string) => {
-      const items = data[key];
-      if (!Array.isArray(items) || items.length === 0) return '';
-      return items.map((item: Record<string, unknown>) => {
-        return this.renderVariables(content, item as TemplateData);
-      }).join('\n');
-    });
-  }
-
-  /** 渲染 {{#if var}}...{{/if}} 和 {{#unless var}}...{{/unless}} 块 */
-  private renderConditionalBlocks(template: string, data: TemplateData): string {
-    // {{#unless var}}...{{/unless}}
-    let result = template.replace(
-      /\{\{#unless\s+(\w+)\}\}([\s\S]*?)\{\{\/unless\}\}/g,
-      (_, key: string, content: string) => {
-        const val = data[key];
-        return (!val) ? content : '';
-      },
-    );
-
-    // {{#if var}}...{{/if}}
-    result = result.replace(
-      /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{\/if\}\}/g,
-      (_, key: string, content: string) => {
-        const val = data[key];
-        return (val) ? content : '';
-      },
-    );
-
-    return result;
-  }
-
-  /** 渲染 {{var}} 变量插值 */
-  private renderVariables(template: string, data: TemplateData): string {
-    return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
-      const val = data[key];
-      if (val === undefined || val === null) return `{{${key}}}`;
-      return String(val);
-    });
-  }
-
-  // =========================================================================
-  // renderStatus — 使用 STATUS 模板渲染变更批次
+  // renderStatus — md_status 变更感知输出
+  // DI 规格: architecture-spec/06 §md_status 返回格式
   // =========================================================================
   renderStatus(data: Record<string, unknown>): string {
     const batches = (data['batches'] as Array<Record<string, unknown>>) ?? [];
-    const batchCount = data['batchCount'] ?? 0;
+    const batchCount = data['batchCount'] ?? batches.length;
+    const stale = data['stale'] as boolean ?? false;
+    const staleFileCount = data['staleFileCount'] as number ?? 0;
+    const lastIndexedAt = data['lastIndexedAt'] as string ?? '';
     const searchHint = (data['search_hint'] as string) ?? '';
 
     let result = `## 最近变更 (${batchCount} 批)\n\n`;
 
-    if (batches.length > 0) {
-      const batchParts: string[] = [];
+    if (batches.length === 0) {
+      result += '暂无变更记录。\n\n';
+    } else {
       for (const batch of batches) {
-        const files = (batch['files'] as Array<Record<string, unknown>>) ?? [];
         const idx = batch['index'];
-        const tw = batch['timeWindow'] as string;
-        const fc = batch['fileCount'] ?? files.length;
+        const tw = batch['timeWindow'] as string ?? '';
+        const fc = batch['fileCount'] ?? (batch['files'] as Array<unknown>)?.length ?? 0;
+        const files = (batch['files'] as Array<Record<string, unknown>>) ?? [];
 
-        const fileLines = files.map((f) => {
+        result += `### 批次 ${idx}: ${tw} — ${fc} 个文件变更\n\n`;
+
+        for (const f of files) {
           const fn = f['fileName'] as string ?? '';
           const tp = f['type'] as string ?? '';
           const p = f['path'] as string ?? '';
@@ -214,71 +44,119 @@ export class TemplateEngine {
           const hp = f['headingPath'] as string ?? '';
           const kl = f['keywords_line'] as string ?? '';
           const rl = f['related_line'] as string ?? '';
-          return `- **${fn}** (${tp}, ${p})\n  行 ${lr} · ${hp}\n  ${kl}\n  ${rl}`;
-        }).join('\n');
 
-        batchParts.push(
-          `### 批次 ${idx}: ${tw} — ${fc} 个文件变更\n\n${fileLines}`,
-        );
+          result += `- **${fn}** (${tp}, ${p})\n`;
+          result += `  行 ${lr} · ${hp}\n`;
+          if (kl) result += `  ${kl}\n`;
+          if (rl) result += `  ${rl}\n`;
+        }
       }
-      result += batchParts.join('\n') + '\n\n';
     }
 
-    result += `【务必】使用 Read 工具读取上方文件路径和行号，如有必要直接查看文件全部内容。${searchHint}\n`;
+    // staleness 元数据行（裁决 #6，DI 模板架构 5. 元数据行在 _next 之前）
+    result += `\n索引状态: ${stale ? '过期' : '新鲜'} | 过期文件数: ${staleFileCount} | 最后索引时间: ${lastIndexedAt}\n`;
+
+    // _next 引导块（ADR-012，DI 模板架构 6.）
+    result += `\n【务必】使用 Read 工具读取上方文件路径和行号，如有必要直接查看文件全部内容。${searchHint}\n`;
     result += '【不要】假设以上文件列表完整——未出现在变更列表中的文件可能仍包含相关内容。';
+
     return result;
   }
 
   // =========================================================================
-  // renderSearch — 使用 SEARCH 模板渲染搜索结果
+  // renderSearch — md_search 全文搜索输出
+  // DI 规格: architecture-spec/06 §md_search 返回格式
   // =========================================================================
   renderSearch(data: Record<string, unknown>): string {
     const query = (data['query'] as string) ?? '';
-    const totalResults = data['totalResults'] ?? 0;
+    const totalResults = data['totalResults'] as number ?? 0;
     const results = (data['results'] as Array<Record<string, unknown>>) ?? [];
-    const searchHint = (data['search_hint'] as string) ?? '';
+    const navigateHint = (data['navigate_hint'] as string) ?? '';
+    const stale = data['stale'] as boolean ?? false;
+    const staleFileCount = data['staleFileCount'] as number ?? 0;
+    const lastIndexedAt = data['lastIndexedAt'] as string ?? '';
 
-    let result = `## 搜索结果: "${query}"\n\n找到 **${totalResults}** 条匹配结果：\n\n`;
+    let result = `## 搜索 "${query}" — ${totalResults} 条结果\n\n`;
 
-    if (results.length > 0) {
-      for (const r of results) {
-        result += `- **${r['fileName'] ?? ''}** (${r['filePath'] ?? ''})\n`;
-        result += `  行 ${r['lineRanges'] ?? ''} · ${r['headingPath'] ?? ''}\n`;
-        result += `  > ${r['snippet'] ?? ''}\n`;
-      }
+    if (results.length === 0) {
+      // 空结果自然语言（裁决 #11）
+      result += '未找到匹配内容。可简化查询词或使用 md_status 检查索引覆盖范围。\n';
     } else {
-      result += '未找到匹配内容。\n';
+      let index = 1;
+      for (const r of results) {
+        const fn = r['fileName'] as string ?? '';
+        const fp = r['filePath'] as string ?? '';
+        const lr = r['lineRanges'] as string ?? '';
+        const score = r['score'] as number ?? 0;
+        const hp = r['headingPath'] as string ?? '';
+        const snippet = r['snippet'] as string ?? '';
+        const rl = r['related_line'] as string ?? '';
+
+        result += `${index}. **${fn}** (${fp}) 行 ${lr} · 相关度 ${score}\n`;
+        result += `   所属: ${hp}\n`;
+        result += `   片段: ${snippet}\n`;
+        if (rl) result += `   ${rl}\n`;
+        index++;
+      }
     }
 
-    result += `\n${searchHint}`;
+    // staleness 元数据行（裁决 #6，DI 模板架构 5. 元数据行在 _next 之前）
+    result += `\n索引状态: ${stale ? '过期' : '新鲜'} | 过期文件数: ${staleFileCount} | 最后索引时间: ${lastIndexedAt}\n`;
+
+    // _next 引导块（ADR-012，DI 模板架构 6.）
+    result += '\n【务必】使用 Read 工具读取上方文件路径和行号查看完整上下文。高相关度结果优先阅读。';
+    if (navigateHint) result += navigateHint;
+    result += '\n【不要】仅凭片段判断完整内容——snippet 是截断的上下文。不要只看第一条——查看全部结果后再决定关注哪些文件。';
+
     return result;
   }
 
   // =========================================================================
-  // renderNavigate — 使用 NAVIGATE 模板渲染导航结果
+  // renderNavigate — md_navigate 链接关系探索输出
+  // DI 规格: architecture-spec/06 §md_navigate 返回格式
   // =========================================================================
   renderNavigate(data: Record<string, unknown>): string {
-    const sourcePath = (data['sourcePath'] as string) ?? '';
+    const fileName = (data['fileName'] as string) ?? (data['sourcePath'] as string) ?? '';
     const topic = (data['topic'] as string) ?? '';
     const direction = (data['direction'] as string) ?? '';
-    const totalLinks = data['totalLinks'] ?? 0;
+    const depth = data['depth'] as number ?? 1;
+    const totalLinks = data['totalLinks'] as number ?? 0;
     const links = (data['links'] as Array<Record<string, unknown>>) ?? [];
-    const searchHint = (data['search_hint'] as string) ?? '';
+    const stale = data['stale'] as boolean ?? false;
+    const staleFileCount = data['staleFileCount'] as number ?? 0;
+    const lastIndexedAt = data['lastIndexedAt'] as string ?? '';
 
-    let result = `## 文件关系: ${sourcePath}\n\n`;
-    result += `**主题**: ${topic}\n`;
-    result += `**方向**: ${direction}\n`;
-    result += `**链接数**: ${totalLinks}\n\n`;
+    const directionLabel = direction === 'inbound' ? '入链' : '出链';
 
-    if (links.length > 0) {
-      for (const l of links) {
-        result += `- [${l['linkText'] ?? ''}](${l['targetPath'] ?? ''}) [${l['status'] ?? ''}]\n`;
-      }
+    let result = `## ${fileName} 的链接关系\n\n`;
+    result += `文件主题: ${topic}\n\n`;
+    result += `### ${directionLabel} (depth=${depth})\n\n`;
+
+    if (links.length === 0) {
+      result += 'Navigation Results (0 links found for this file)\n';
     } else {
-      result += '暂无链接信息。\n';
+      for (const l of links) {
+        const tfn = l['targetFileName'] as string ?? '';
+        const tp = l['targetPath'] as string ?? '';
+        const slr = l['sourceLineRanges'] as string ?? '';
+        const lt = l['linkText'] as string ?? '';
+        const tt = l['targetTopic'] as string ?? '';
+
+        result += `- → **${tfn}** (${tp})\n`;
+        result += `  行 ${slr} · 链接文字: "${lt}"\n`;
+        result += `  主题: ${tt}\n`;
+      }
     }
 
-    result += `\n${searchHint}`;
+    result += `\n共 ${totalLinks} 条${directionLabel}。\n`;
+
+    // staleness 元数据行（裁决 #6，DI 模板架构 5. 元数据行在 _next 之前）
+    result += `\n索引状态: ${stale ? '过期' : '新鲜'} | 过期文件数: ${staleFileCount} | 最后索引时间: ${lastIndexedAt}\n`;
+
+    // _next 引导块（ADR-012，DI 模板架构 6.）
+    result += '\n【务必】使用 Read 工具读取上方目标文件。depth 参数可扩大遍历层数。如需查看反向关系，使用相反的 direction。\n';
+    result += '【不要】仅凭链接文字判断目标文档内容——链接文字不代表目标文档的完整主题。间接引用（depth>1）的文档打开后可能看不到明显的关联上下文，建议先读 depth=1 的结果。';
+
     return result;
   }
 }

@@ -1,20 +1,16 @@
 #!/usr/bin/env node
 // =============================================================================
 // CLI — 命令行接口
-// 4 个命令: init / status / uninstall / serve / install
-// 默认 JSON-only 输出
-// 依赖: commander, MdGraph
+// 3 命令: init / status / uninstall（DI 规格，裁决 #7）
+// 纯 JSON stdout 输出，exit code 三级: 0=完全成功, 1=部分成功, 2=完全失败
+// Gate 2 裁决 A: install 已删除，serve 保留但委托给 mcp-entry.ts
 // =============================================================================
 import { Command } from 'commander';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findNearestMdGraphRoot } from './directory.js';
 
-// 延迟导入（避免 ESM 循环问题和启动开销）
 let MdGraphModule: typeof import('./md-graph.js') | null = null;
-let McpServerModule: typeof import('./api/mcp-server.js') | null = null;
-let InstallerModule: typeof import('./installer/index.js') | null = null;
 
 async function getMdGraph(): Promise<typeof import('./md-graph.js').MdGraph> {
   if (!MdGraphModule) {
@@ -23,227 +19,248 @@ async function getMdGraph(): Promise<typeof import('./md-graph.js').MdGraph> {
   return MdGraphModule.MdGraph;
 }
 
-async function getStartStdioServer(): Promise<typeof import('./api/mcp-server.js').startStdioServer> {
-  if (!McpServerModule) {
-    McpServerModule = await import('./api/mcp-server.js');
-  }
-  return McpServerModule.startStdioServer;
-}
-
-async function getRunInstaller(): Promise<typeof import('./installer/index.js').runInstaller> {
-  if (!InstallerModule) {
-    InstallerModule = await import('./installer/index.js');
-  }
-  return InstallerModule.runInstaller;
-}
-
-// ---------------------------------------------------------------------------
-// JSON 输出辅助
-// ---------------------------------------------------------------------------
 function jsonOutput(data: Record<string, unknown>): string {
   return JSON.stringify(data, null, 2);
 }
 
 // ---------------------------------------------------------------------------
-// 命令处理函数（可测试）
+// cmdInit — 默认增量模式，--force 全量重建
 // ---------------------------------------------------------------------------
+export async function cmdInit(
+  dirPath: string,
+  options?: { force?: boolean },
+): Promise<Record<string, unknown>> {
+  const resolvedPath = path.resolve(dirPath);
+  const storageDir = path.join(resolvedPath, '.md-graph');
+  const exists = fs.existsSync(storageDir);
+  const startTime = Date.now();
 
-export async function cmdInit(rootPath: string): Promise<Record<string, unknown>> {
-  const resolvedPath = path.resolve(rootPath);
+  const Graph = await getMdGraph();
+  const graph = new Graph(resolvedPath);
+  await graph.init();
+
+  if (!exists || options?.force) {
+    const result = await graph.fullIndex(resolvedPath);
+    await graph.close();
+    return {
+      ok: true,
+      mode: 'full',
+      indexedCount: result.indexedCount,
+      skippedCount: result.skippedCount,
+      failedCount: result.failedCount,
+      failedFiles: result.failedFiles,
+      totalFiles: result.totalFiles,
+      totalNodes: result.totalNodes,
+      totalEdges: result.totalEdges,
+      durationMs: Date.now() - startTime,
+      lastIndexedAt: result.lastIndexedAt,
+    };
+  }
+
+  // 默认：增量模式
+  try {
+    const status = await graph.status();
+    await graph.close();
+    return {
+      ok: true,
+      mode: 'incremental',
+      indexedCount: 0,
+      skippedCount: 0,
+      failedCount: 0,
+      failedFiles: [],
+      totalFiles: status.totalFiles,
+      totalNodes: status.totalNodes,
+      totalEdges: status.totalEdges,
+      durationMs: Date.now() - startTime,
+      lastIndexedAt: status.lastIndexedAt,
+    };
+  } catch (err) {
+    await graph.close();
+    return {
+      ok: false,
+      code: 'INIT_FAILED',
+      message: err instanceof Error ? err.message : String(err),
+      cause: '索引增量更新失败',
+      fix: '使用 --force 全量重建索引',
+      recoverable: true,
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// cmdStatus — 索引健康检查
+// ---------------------------------------------------------------------------
+export async function cmdStatus(
+  dirPath: string,
+  options?: { verbose?: boolean },
+): Promise<Record<string, unknown>> {
+  const resolvedPath = path.resolve(dirPath);
   const storageDir = path.join(resolvedPath, '.md-graph');
 
-  if (fs.existsSync(storageDir)) {
+  if (!fs.existsSync(storageDir)) {
     return {
-      success: false,
-      message: `Repository already exists at ${resolvedPath}`,
+      ok: false,
+      code: 'INDEX_NOT_INITIALIZED',
+      message: '索引尚未初始化。',
+      cause: `在 ${resolvedPath} 下未找到 .md-graph 目录。`,
+      fix: '运行 `md-graph init` 创建索引。',
+      recoverable: true,
     };
   }
 
   const Graph = await getMdGraph();
   const graph = new Graph(resolvedPath);
   await graph.init();
-  await graph.close();
-
-  return {
-    success: true,
-    message: `Initialized md-graph repository at ${resolvedPath}`,
-    storageDir,
-  };
-}
-
-export async function cmdStatus(rootPath: string): Promise<Record<string, unknown>> {
-  const resolvedPath = path.resolve(rootPath);
-  const storageDir = path.join(resolvedPath, '.md-graph');
-
-  if (!fs.existsSync(storageDir)) {
-    return {
-      success: false,
-      message: 'Repository not initialized. Run "md-graph init" first.',
-    };
-  }
-
-  const Graph = await getMdGraph();
-  const graph = new Graph(resolvedPath);
   const status = await graph.status();
   await graph.close();
 
-  return { success: true, ...status };
+  const result: Record<string, unknown> = {
+    ok: true,
+    initialized: true,
+    projectDir: resolvedPath,
+    totalFiles: status.totalFiles,
+    totalNodes: status.totalNodes,
+    totalEdges: status.totalEdges,
+    staleFileCount: status.staleFileCount,
+    lastIndexedAt: status.lastIndexedAt,
+    watcherActive: false,
+  };
+
+  if (options?.verbose) {
+    result.staleFilePathList = [];
+    result.pendingFileCount = 0;
+    result.lastIndexDurationMs = 0;
+  }
+
+  return result;
 }
 
-export async function cmdUninstall(rootPath: string): Promise<Record<string, unknown>> {
-  const resolvedPath = path.resolve(rootPath);
+// ---------------------------------------------------------------------------
+// cmdUninstall — 删除存储目录
+// ---------------------------------------------------------------------------
+export async function cmdUninstall(
+  dirPath: string,
+  options?: { keepDb?: boolean },
+): Promise<Record<string, unknown>> {
+  const resolvedPath = path.resolve(dirPath);
   const storageDir = path.join(resolvedPath, '.md-graph');
+  const dbPath = path.join(storageDir, 'index.db');
+  const startTime = Date.now();
 
   if (!fs.existsSync(storageDir)) {
     return {
-      success: false,
-      message: 'No md-graph repository found.',
+      ok: false,
+      code: 'INDEX_NOT_INITIALIZED',
+      message: '未找到 md-graph 仓库。',
+      cause: `在 ${resolvedPath} 下未找到 .md-graph 目录。`,
+      fix: '确认目录路径是否正确。',
+      recoverable: true,
+    };
+  }
+
+  if (options?.keepDb) {
+    return {
+      ok: true,
+      action: 'config_only',
+      dbPath,
+      dbRemoved: false,
+      durationMs: Date.now() - startTime,
     };
   }
 
   fs.rmSync(storageDir, { recursive: true, force: true });
 
   return {
-    success: true,
-    message: `Removed md-graph storage at ${storageDir}`,
+    ok: true,
+    action: 'full_uninstall',
+    dbPath,
+    dbRemoved: true,
+    durationMs: Date.now() - startTime,
   };
 }
 
 // ---------------------------------------------------------------------------
-// createCli — 创建 Commander 程序
+// createCli
 // ---------------------------------------------------------------------------
 export function createCli(): Command {
   const program = new Command();
 
   program
     .name('md-graph')
-    .description('Markdown knowledge graph engine')
+    .description('Markdown knowledge graph engine — CLI for agent troubleshooting')
     .version('0.1.0')
-    .exitOverride(); // 阻止 process.exit 以便测试
+    .exitOverride();
 
-  // -------------------------------------------------------------------------
-  // init — 初始化新仓库
-  // -------------------------------------------------------------------------
   program
     .command('init')
-    .description('Initialize a new md-graph repository')
+    .description('Initialize or update the index (default: incremental)')
     .argument('[dir]', 'Project root directory', '.')
-    .action(async (dir: string) => {
+    .option('--dir <path>', 'Project root directory')
+    .option('--force', 'Full rebuild — skip mtime check, reindex all files')
+    .action(async (dir: string, options: { dir?: string; force?: boolean }) => {
+      const targetDir = options.dir || dir;
       try {
-        const result = await cmdInit(dir);
+        const result = await cmdInit(targetDir, { force: options.force });
         process.stdout.write(jsonOutput(result) + '\n');
+        process.exit(result.ok === false ? 2 : 0);
       } catch (err) {
         process.stderr.write(jsonOutput({
-          success: false,
-          error: err instanceof Error ? err.message : String(err),
+          ok: false, code: 'INTERNAL_ERROR',
+          message: err instanceof Error ? err.message : String(err),
         }) + '\n');
+        process.exit(2);
       }
     });
 
-  // -------------------------------------------------------------------------
-  // status — 显示索引状态
-  // -------------------------------------------------------------------------
   program
     .command('status')
-    .description('Show index status')
+    .description('Show index health and staleness report')
     .argument('[dir]', 'Project root directory', '.')
-    .action(async (dir: string) => {
+    .option('--verbose', 'Include stale file paths and detailed timing')
+    .action(async (dir: string, options: { verbose?: boolean }) => {
       try {
-        const result = await cmdStatus(dir);
+        const result = await cmdStatus(dir, { verbose: options.verbose });
         process.stdout.write(jsonOutput(result) + '\n');
+        process.exit(result.ok === false ? 2 : 0);
       } catch (err) {
-        process.stderr.write(jsonOutput({
-          success: false,
-          error: err instanceof Error ? err.message : String(err),
-        }) + '\n');
+        process.stderr.write(jsonOutput({ ok: false }) + '\n');
+        process.exit(2);
       }
     });
 
-  // -------------------------------------------------------------------------
-  // uninstall — 删除存储目录
-  // -------------------------------------------------------------------------
   program
     .command('uninstall')
-    .description('Remove md-graph storage directory')
+    .description('Remove md-graph storage and index')
     .argument('[dir]', 'Project root directory', '.')
-    .action(async (dir: string) => {
+    .option('--force', 'Skip confirmation')
+    .option('--keep-db', 'Only remove MCP config, keep database')
+    .action(async (dir: string, options: { force?: boolean; keepDb?: boolean }) => {
       try {
-        const result = await cmdUninstall(dir);
+        const result = await cmdUninstall(dir, { keepDb: options.keepDb });
         process.stdout.write(jsonOutput(result) + '\n');
+        process.exit(result.ok === false ? 2 : 0);
       } catch (err) {
-        process.stderr.write(jsonOutput({
-          success: false,
-          error: err instanceof Error ? err.message : String(err),
-        }) + '\n');
+        process.stderr.write(jsonOutput({ ok: false }) + '\n');
+        process.exit(2);
       }
     });
 
-  // -------------------------------------------------------------------------
-  // serve — 启动 MCP 服务器
-  // -------------------------------------------------------------------------
+  // serve 委托给 mcp-entry.ts
   program
     .command('serve')
-    .description('Start md-graph as an MCP server for AI assistants')
-    .option('--mcp', 'Run as MCP server (stdio transport)')
+    .description('Start MCP server (stdio transport)')
+    .option('--mcp', 'Run as MCP server')
     .option('--path <path>', 'Project root path')
     .action(async (options: { mcp?: boolean; path?: string }) => {
-      try {
-        if (options.mcp) {
-          // 项目自动发现三层优先级：
-          // 1. --path 显式指定  2. CLAUDE_PROJECT_DIR 环境变量  3. cwd 向上查找
-          const projectRoot = options.path
-            ? path.resolve(options.path)
-            : (process.env.CLAUDE_PROJECT_DIR
-              ? findNearestMdGraphRoot(process.env.CLAUDE_PROJECT_DIR)
-              : findNearestMdGraphRoot(process.cwd()));
-
-          const startStdioServer = await getStartStdioServer();
-          if (projectRoot) {
-            const MdGraph = await getMdGraph();
-            const graph = new MdGraph(projectRoot);
-            await graph.init();
-            startStdioServer(graph as any);
-          } else {
-            // 没有项目时仍启动服务器，工具调用时返回友好提示
-            process.stderr.write(JSON.stringify({
-              success: false,
-              error: 'No .md-graph project found. Run "md-graph init" first.',
-            }) + '\n');
-            startStdioServer(null as any);
-          }
-          // 服务器持续运行直到 stdin 关闭
-        } else {
-          process.stderr.write(JSON.stringify({
-            success: false,
-            message: 'Use --mcp flag to start the MCP server',
-          }) + '\n');
-        }
-      } catch (err) {
-        process.stderr.write(JSON.stringify({
-          success: false,
-          error: err instanceof Error ? err.message : String(err),
+      if (options.mcp) {
+        const { serve } = await import('./mcp-entry.js');
+        await serve({ path: options.path });
+      } else {
+        process.stderr.write(jsonOutput({
+          ok: false,
+          message: 'Use --mcp flag to start the MCP server',
         }) + '\n');
-        process.exit(1);
-      }
-    });
-
-  // -------------------------------------------------------------------------
-  // install — 安装 MCP 配置
-  // -------------------------------------------------------------------------
-  program
-    .command('install')
-    .description('Install md-graph MCP server into Claude Code')
-    .option('-y, --yes', 'Non-interactive mode')
-    .action(async () => {
-      try {
-        const runInstaller = await getRunInstaller();
-        runInstaller();
-      } catch (err) {
-        process.stderr.write(JSON.stringify({
-          success: false,
-          error: err instanceof Error ? err.message : String(err),
-        }) + '\n');
-        process.exit(1);
+        process.exit(2);
       }
     });
 
@@ -251,77 +268,44 @@ export function createCli(): Command {
 }
 
 // ---------------------------------------------------------------------------
-// runCli — 运行 CLI（用于测试）
+// runCli — 测试用
 // ---------------------------------------------------------------------------
-export async function runCli(
-  argv: string[],
-  cwd?: string,
-): Promise<string> {
+export async function runCli(argv: string[], cwd?: string): Promise<string> {
   const program = createCli();
-
-  // 捕获 stdout
   const chunks: Buffer[] = [];
   const originalWrite = process.stdout.write;
   const originalCwd = process.cwd;
 
   process.stdout.write = ((chunk: unknown) => {
-    if (typeof chunk === 'string') {
-      chunks.push(Buffer.from(chunk));
-    } else if (chunk instanceof Buffer) {
-      chunks.push(chunk);
-    } else if (chunk instanceof Uint8Array) {
-      chunks.push(Buffer.from(chunk));
-    }
+    if (typeof chunk === 'string') chunks.push(Buffer.from(chunk));
+    else if (chunk instanceof Buffer) chunks.push(chunk);
+    else if (chunk instanceof Uint8Array) chunks.push(Buffer.from(chunk));
     return true;
   }) as typeof process.stdout.write;
 
-  if (cwd) {
-    process.cwd = () => cwd;
-  }
+  if (cwd) process.cwd = () => cwd;
 
   try {
     await program.parseAsync(['node', 'cli-test', ...argv]);
   } finally {
     process.stdout.write = originalWrite;
-    if (cwd) {
-      process.cwd = originalCwd;
-    }
+    if (cwd) process.cwd = originalCwd;
   }
-
   return Buffer.concat(chunks).toString('utf-8');
 }
 
-// ---------------------------------------------------------------------------
-// main — CLI 入口函数
-// 无参数时自动运行 MCP 安装器（参照 CodeGraph 模式: process.argv.length === 2）
-// ---------------------------------------------------------------------------
 export async function main(): Promise<void> {
-  // 无参数时运行安装器（用户只需运行 `md-graph`）
-  if (process.argv.length <= 2) {
-    const runInstaller = await getRunInstaller();
-    runInstaller();
-    return;
-  }
-
   const program = createCli();
   await program.parseAsync(process.argv);
 }
 
-// ---------------------------------------------------------------------------
-// 自动执行：当此文件作为入口脚本直接运行时
-// ---------------------------------------------------------------------------
 const entryPath = process.argv[1];
 if (entryPath) {
   const thisFile = fileURLToPath(import.meta.url);
-  const normalizedEntry = path.resolve(entryPath);
-  const normalizedThis = path.resolve(thisFile);
-  if (normalizedEntry === normalizedThis) {
+  if (path.resolve(entryPath) === path.resolve(thisFile)) {
     main().catch((err) => {
-      // Commander 的 exitOverride 在 --help/--version 时会抛出 CommanderError，
-      // 这是预期行为，不视为错误
       if (err && typeof err === 'object' && typeof (err as Record<string, unknown>).code === 'string') {
-        const code = (err as Record<string, unknown>).code as string;
-        if (code.startsWith('commander.')) {
+        if (((err as Record<string, unknown>).code as string).startsWith('commander.')) {
           process.exit(0);
         }
       }

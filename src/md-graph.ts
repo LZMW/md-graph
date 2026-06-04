@@ -13,6 +13,7 @@ import { Indexer } from './analysis/indexer.js';
 import { Searcher } from './analysis/searcher.js';
 import { Traverser } from './analysis/traverser.js';
 import { Watcher } from './analysis/watcher.js';
+import { checkStaleness, mergeStaleness } from './storage/staleness.js';
 import type {
   SearchResult,
   SearchOptions,
@@ -92,8 +93,8 @@ export class MdGraph {
 
     // 初始化分析模块
     this.indexer = new Indexer(this.fileStore, this.db, ParserRegistry);
-    this.searcher = new Searcher(this.db);
-    this.traverser = new Traverser(this.db);
+    this.searcher = new Searcher(this.db, this.rootPath);
+    this.traverser = new Traverser(this.db, this.rootPath);
 
     // 初始化模板引擎
     this.template = new TemplateEngine();
@@ -123,7 +124,11 @@ export class MdGraph {
     }
 
     const dbStatus = this.db.getStatus();
-    const staleInfo = this.db.getStaleInfo();
+    const dbStaleInfo = this.db.getStaleInfo();
+    const staleInfo = mergeStaleness(
+      checkStaleness(this.rootPath, this.db.getFileStamps()),
+      dbStaleInfo.lastIndexedAt,
+    );
 
     return {
       totalFiles: dbStatus.totalFiles,
@@ -185,16 +190,19 @@ export class MdGraph {
     const status = await this.status();
 
     // 尝试从数据库中获取变更批次
-    let changeBatch;
+    let changeBatch: Record<string, unknown> = { batches: [], batchCount: 0, search_hint: '' };
     try {
-      changeBatch = this.db.getChangeBatches();
+      changeBatch = this.db.getChangeBatches() as unknown as Record<string, unknown>;
     } catch {
-      changeBatch = { batches: [], batchCount: 0, search_hint: '' };
+      // 使用默认空批次
     }
 
     return this.template.renderStatus({
       ...changeBatch,
-      search_hint: `试试搜索关键词，或使用 navigate 查看文件关系。`,
+      search_hint: (changeBatch.search_hint as string) || '试试搜索关键词，或使用 navigate 查看文件关系。',
+      stale: status.stale,
+      staleFileCount: status.staleFileCount,
+      lastIndexedAt: status.lastIndexedAt,
     });
   }
 
@@ -205,17 +213,27 @@ export class MdGraph {
     await this.ensureInitialized();
     const searchResult = await this.search(query, options);
 
+    const results = searchResult.results.map((r) => ({
+      fileName: r.fileName,
+      filePath: r.filePath,
+      headingPath: r.headingPath,
+      snippet: r.snippet,
+      lineRanges: r.lineRanges,
+      score: r.score,
+      related_line: r.relatedDocCount > 0 ? `关联: ${r.relatedDocCount} 个文档链接到此` : '',
+    }));
+
+    const hasRelated = searchResult.results.some(r => r.relatedDocCount > 0);
+    const navigateHint = hasRelated ? ' 关联数 > 0 的结果可使用 md_navigate 查看文档关系图。' : '';
+
     return this.template.renderSearch({
       query,
       totalResults: searchResult.totalResults,
-      results: searchResult.results.map((r) => ({
-        fileName: r.fileName,
-        filePath: r.filePath,
-        headingPath: r.headingPath,
-        snippet: r.snippet,
-        lineRanges: r.lineRanges,
-      })),
-      search_hint: `试试换个关键词搜索，或使用 status 查看知识库状态。`,
+      results,
+      navigate_hint: navigateHint,
+      stale: searchResult.stale,
+      staleFileCount: searchResult.staleFileCount,
+      lastIndexedAt: searchResult.lastIndexedAt,
     });
   }
 
@@ -252,16 +270,23 @@ export class MdGraph {
     );
 
     return this.template.renderNavigate({
+      fileName: navResult.sourceFileName || navResult.sourcePath,
       sourcePath: navResult.sourcePath,
       topic: navResult.topic,
       direction: navResult.direction,
+      depth: navResult.depth,
       totalLinks: navResult.totalLinks,
       links: navResult.links.map((l) => ({
         linkText: l.linkText,
         targetPath: l.targetPath,
+        targetFileName: l.targetFileName,
+        sourceLineRanges: l.sourceLineRanges,
+        targetTopic: l.targetTopic,
         status: l.status,
       })),
-      search_hint: `试试换个方向导航，或使用 search 搜索相关内容。`,
+      stale: navResult.stale,
+      staleFileCount: navResult.staleFileCount,
+      lastIndexedAt: navResult.lastIndexedAt,
     });
   }
 

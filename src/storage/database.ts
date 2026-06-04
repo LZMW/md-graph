@@ -441,10 +441,19 @@ export class SqliteDbAdapter {
     `).get() as { total: number; active_count: number; last_indexed: string };
 
     return {
-      stale: false, // SqliteDbAdapter 层无法判断 stale，由上层 Indexer 计算
+      stale: false,
       staleFileCount: 0,
       lastIndexedAt: row.last_indexed,
     };
+  }
+
+  /** 获取所有 active 文件的时间戳信息（供 staleness 模块做 fs.stat 检查） */
+  getFileStamps(): Array<{ path: string; size: number; mtimeMs: number; status: string }> {
+    return this.db.prepare(`
+      SELECT path, size, mtime_ms AS mtimeMs, status
+      FROM files
+      WHERE status = 'active'
+    `).all() as Array<{ path: string; size: number; mtimeMs: number; status: string }>;
   }
 
   getStatus(): IndexStatus {
@@ -493,11 +502,21 @@ export class SqliteDbAdapter {
       return { batches: [], batchCount: 0, search_hint: '暂无变更记录。' };
     }
 
-    // 按日期分组
-    const batchMap = new Map<string, ChangeItem[]>();
+    // 解析每个文件的变更记录并收集时间戳
+    const items: Array<{
+      time: number;
+      fileName: string;
+      type: string;
+      path: string;
+      lineRanges: string;
+      headingPath: string;
+      keywords_line: string;
+      related_line: string;
+    }> = [];
+
     for (const file of files) {
-      const day = (file.indexed_at || '').slice(0, 10) || 'unknown';
-      if (!batchMap.has(day)) batchMap.set(day, []);
+      const ts = Date.parse(file.indexed_at || '');
+      const timeVal = Number.isNaN(ts) ? 0 : ts;
 
       let details: Array<{ type: string; headingPath: string; lineRanges: string; boldTerms?: string[]; italicTerms?: string[]; codeTerms?: string[] }> = [];
       try {
@@ -508,9 +527,10 @@ export class SqliteDbAdapter {
 
       const fileName = file.path.replace(/\\/g, '/').split('/').pop() || file.path;
       for (const d of details) {
-        batchMap.get(day)!.push({
+        items.push({
+          time: timeVal,
           fileName,
-          type: d.type as ChangeItem['type'],
+          type: d.type || 'modified',
           path: file.path,
           lineRanges: d.lineRanges || '',
           headingPath: d.headingPath || '',
@@ -520,14 +540,51 @@ export class SqliteDbAdapter {
       }
     }
 
+    // 按时间倒序排列
+    items.sort((a, b) => b.time - a.time);
+
+    // 按 ±15 分钟窗口分组（相邻变更间隔 < 30 分钟归入同一批次）
+    const grouped: Array<typeof items> = [];
+    let currentGroup: typeof items = [];
+    let groupTime = 0;
+
+    for (const item of items) {
+      if (currentGroup.length === 0) {
+        currentGroup.push(item);
+        groupTime = item.time;
+      } else if (Math.abs(item.time - groupTime) < 30 * 60 * 1000) {
+        currentGroup.push(item);
+      } else {
+        grouped.push(currentGroup);
+        currentGroup = [item];
+        groupTime = item.time;
+      }
+    }
+    if (currentGroup.length > 0) grouped.push(currentGroup);
+
+    // 构建批次输出
     const batches: Batch[] = [];
     let index = 1;
-    for (const [day, items] of batchMap) {
+    for (const group of grouped) {
+      const centerTime = group[0]?.time || 0;
+      const d = new Date(centerTime);
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      const timeWindow = `${hh}:${mm} ± 15min`;
+
       batches.push({
         index: index++,
-        timeWindow: day,
-        fileCount: items.length,
-        files: items,
+        timeWindow,
+        fileCount: group.length,
+        files: group.map((g) => ({
+          fileName: g.fileName,
+          type: g.type as ChangeItem['type'],
+          path: g.path,
+          lineRanges: g.lineRanges,
+          headingPath: g.headingPath,
+          keywords_line: g.keywords_line,
+          related_line: g.related_line,
+        })),
       });
     }
 

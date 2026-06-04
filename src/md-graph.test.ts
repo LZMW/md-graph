@@ -116,7 +116,7 @@ describe('MdGraph', () => {
     if (searchResult.results.length > 0) {
       const nodeId = searchResult.results[0].id;
       const result = await graph.renderNavigate(nodeId, 'outbound', 1);
-      assert.ok(result.includes('文件关系'), `应包含文件关系: ${result}`);
+      assert.ok(result.includes('的链接关系'), `应包含链接关系: ${result}`);
     }
   });
 });

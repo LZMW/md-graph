@@ -132,7 +132,7 @@ describe('McpServer', () => {
     assert.equal(callResult.content[0]?.type, 'text');
   });
 
-  it('handleRequest — tools/call md_search 缺少参数应返回错误', async () => {
+  it('handleRequest — tools/call md_search 缺少参数应返回 content 级错误', async () => {
     const response = await server.handleRequest({
       jsonrpc: '2.0',
       id: 5,
@@ -140,8 +140,10 @@ describe('McpServer', () => {
       params: { name: 'md_search', arguments: {} },
     });
     assert.ok(response);
-    assert.ok(response.error);
-    assert.equal(response.error?.code, -32602);
+    // 裁决 #9: 错误通过 content-level ErrorResponse 返回，非 JSON-RPC 协议错误
+    const result = response.result as any;
+    assert.ok(result.isError);
+    assert.ok(result.content);
   });
 
   it('handleRequest — 未知方法应返回错误', async () => {

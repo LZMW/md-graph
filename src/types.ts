@@ -80,11 +80,23 @@ export interface ParsedDocument {
 // 错误处理
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// 错误码常量（DI 定义，裁决 #9）
+// ---------------------------------------------------------------------------
+export const ErrorCodes = {
+  INVALID_QUERY: 'INVALID_QUERY',
+  INVALID_PATH: 'INVALID_PATH',
+  INDEX_NOT_INITIALIZED: 'INDEX_NOT_INITIALIZED',
+  INVALID_PARAMETER: 'INVALID_PARAMETER',
+  WATCHER_NOT_READY: 'WATCHER_NOT_READY',
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+} as const;
+
 export class MdGraphError extends Error {
   constructor(
     public code: string,
     message: string,
-    public cause_detail: string = '',
+    public cause: string = '',
     public fix: string = '',
     public recoverable: boolean = true
   ) {
@@ -93,7 +105,7 @@ export class MdGraphError extends Error {
   }
 
   toText(): string {
-    return `问题: ${this.message}\n原因: ${this.cause_detail}\n修复: ${this.fix}`;
+    return `${this.message}\n原因: ${this.cause}\n修复: ${this.fix}`;
   }
 }
 
@@ -101,8 +113,7 @@ export class MdGraphError extends Error {
 // 搜索结果
 // ---------------------------------------------------------------------------
 export interface SearchOptions {
-    maxResults?: number;   // default: 10, max: 50
-    offset?: number;       // default: 0
+    maxResults?: number;   // default: 20, max: 50
     fileGlob?: string;
     type?: 'heading' | 'paragraph' | 'code_block';
     file?: string;         // 按文件路径精确过滤

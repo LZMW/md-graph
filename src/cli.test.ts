@@ -1,8 +1,8 @@
 // =============================================================================
 // CLI — TDD 测试
-// 每个测试使用独立的临时目录以避免相互干扰
+// Gate 3: 适配新的 CLI 输出格式 (success→ok, 默认增量模式)
 // =============================================================================
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -49,7 +49,8 @@ describe('CLI', () => {
     const tmpDir = createTempDir('md-graph-cli-init-');
     try {
       const result = await cmdInit(tmpDir);
-      assert.ok(result.success);
+      assert.ok(result.ok);
+      assert.equal(result.mode, 'full');
       const storageDir = path.join(tmpDir, '.md-graph');
       assert.ok(fs.existsSync(storageDir));
       assert.ok(fs.existsSync(path.join(storageDir, 'index.db')));
@@ -58,14 +59,13 @@ describe('CLI', () => {
     }
   });
 
-  it('cmdInit — 重复初始化应返回失败', async () => {
+  it('cmdInit — 重复初始化应返回增量模式', async () => {
     const tmpDir = createTempDir('md-graph-cli-reinit-');
     try {
       await cmdInit(tmpDir);
       const result = await cmdInit(tmpDir);
-      assert.equal(result.success, false);
-      const msg = result as { message?: string };
-      assert.ok(msg.message?.includes('already exists'));
+      assert.ok(result.ok);
+      assert.equal(result.mode, 'incremental');
     } finally {
       cleanupDir(tmpDir);
     }
@@ -76,7 +76,7 @@ describe('CLI', () => {
     try {
       await cmdInit(tmpDir);
       const result = await cmdStatus(tmpDir);
-      assert.ok(result.success);
+      assert.ok(result.ok);
       assert.ok(typeof result.totalFiles === 'number');
       assert.ok(typeof result.totalNodes === 'number');
       assert.ok(typeof result.totalEdges === 'number');
@@ -89,7 +89,7 @@ describe('CLI', () => {
     const tmpDir = createTempDir('md-graph-cli-nostatus-');
     try {
       const result = await cmdStatus(tmpDir);
-      assert.equal(result.success, false);
+      assert.equal(result.ok, false);
     } finally {
       cleanupDir(tmpDir);
     }
@@ -100,7 +100,7 @@ describe('CLI', () => {
     try {
       await cmdInit(tmpDir);
       const result = await cmdUninstall(tmpDir);
-      assert.ok(result.success);
+      assert.ok(result.ok);
       const storageDir = path.join(tmpDir, '.md-graph');
       assert.ok(!fs.existsSync(storageDir));
     } finally {
@@ -112,7 +112,7 @@ describe('CLI', () => {
     const tmpDir = createTempDir('md-graph-cli-nouninst-');
     try {
       const result = await cmdUninstall(tmpDir);
-      assert.equal(result.success, false);
+      assert.equal(result.ok, false);
     } finally {
       cleanupDir(tmpDir);
     }

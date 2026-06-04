@@ -4,6 +4,7 @@
 // 依赖: SqliteDbAdapter
 // =============================================================================
 import { SqliteDbAdapter } from '../storage/database.js';
+import { checkStaleness, mergeStaleness } from '../storage/staleness.js';
 import type { NavResult, NavLink, Direction, NodeRecord } from '../types.js';
 
 // =============================================================================
@@ -16,7 +17,14 @@ const MAX_DEPTH = 30;
 // Traverser
 // =============================================================================
 export class Traverser {
-  constructor(private readonly db: SqliteDbAdapter) {}
+  private projectRoot: string;
+
+  constructor(
+    private readonly db: SqliteDbAdapter,
+    projectRoot: string,
+  ) {
+    this.projectRoot = projectRoot;
+  }
 
   // =========================================================================
   // navigate — BFS 导航
@@ -34,7 +42,10 @@ export class Traverser {
 
     if (!sourceNode) {
       // 节点不存在，返回空结果
-      const staleInfo = this.db.getStaleInfo();
+      const staleInfo = mergeStaleness(
+      checkStaleness(this.projectRoot, this.db.getFileStamps()),
+      this.db.getStaleInfo().lastIndexedAt,
+    );
       return {
         sourceNodeId: nodeId,
         sourceFileId: 0,
@@ -78,7 +89,10 @@ export class Traverser {
       truncated = result.truncated;
     }
 
-    const staleInfo = this.db.getStaleInfo();
+    const staleInfo = mergeStaleness(
+      checkStaleness(this.projectRoot, this.db.getFileStamps()),
+      this.db.getStaleInfo().lastIndexedAt,
+    );
 
     return {
       sourceNodeId: nodeId,

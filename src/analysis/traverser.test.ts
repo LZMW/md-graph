@@ -19,7 +19,7 @@ describe('Traverser', () => {
 
   before(() => {
     db = new SqliteDbAdapter(':memory:');
-    traverser = new Traverser(db);
+    traverser = new Traverser(db, '.');
 
     // 准备测试数据：文件
     const file = db.insertFile({
@@ -90,7 +90,7 @@ describe('Traverser', () => {
   // 构造函数
   // ---------------------------------------------------------------------------
   it('constructor — 应使用 db 依赖创建 Traverser', () => {
-    const t = new Traverser(db);
+    const t = new Traverser(db, '.');
     assert.ok(t instanceof Traverser);
   });
 
