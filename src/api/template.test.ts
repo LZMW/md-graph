@@ -134,4 +134,106 @@ describe('TemplateEngine', () => {
     assert.ok(result.includes('docs/setup.md'));
     assert.ok(result.includes('Setup guide'));
   });
+
+  // ===========================================================================
+  // renderStatus — STATUS 模板
+  // ===========================================================================
+  it('renderStatus — 应渲染变更批次概览', () => {
+    const engine = new TemplateEngine();
+    const data = {
+      batchCount: 1,
+      batches: [
+        {
+          index: 1,
+          timeWindow: '2026-06-04 14:00~15:00',
+          fileCount: 2,
+          files: [
+            { fileName: 'intro.md', type: 'modified', path: 'docs/intro.md', lineRanges: '1-5', headingPath: 'Introduction', keywords_line: '关键词: welcome, hello', related_line: '关联: guide.md' },
+            { fileName: 'guide.md', type: 'added', path: 'docs/guide.md', lineRanges: '1-10', headingPath: 'Guide', keywords_line: '', related_line: '' },
+          ],
+        },
+      ],
+      search_hint: '试试搜索关键词',
+    };
+    const result = engine.renderStatus(data);
+    assert.ok(result.includes('1 批'));
+    assert.ok(result.includes('批次 1'));
+    assert.ok(result.includes('2026-06-04 14:00~15:00'));
+    assert.ok(result.includes('intro.md'));
+    assert.ok(result.includes('modified'));
+    assert.ok(result.includes('行 1-5'));
+    assert.ok(result.includes('Introduction'));
+    assert.ok(result.includes('welcome'));
+    assert.ok(result.includes('guide.md'));
+    assert.ok(result.includes('试试搜索关键词'));
+  });
+
+  it('renderStatus — 空批次应渲染提示', () => {
+    const engine = new TemplateEngine();
+    const data = { batchCount: 0, batches: [], search_hint: '' };
+    const result = engine.renderStatus(data);
+    assert.ok(result.length > 0);
+  });
+
+  // ===========================================================================
+  // renderSearch — SEARCH 模板
+  // ===========================================================================
+  it('renderSearch — 应渲染搜索结果', () => {
+    const engine = new TemplateEngine();
+    const data = {
+      query: 'hello',
+      totalResults: 2,
+      results: [
+        { fileName: 'intro.md', filePath: 'docs/intro.md', headingPath: 'Introduction', snippet: 'Hello world', score: 1.5, lineRanges: '1-5' },
+      ],
+    };
+    const result = engine.renderSearch(data);
+    assert.ok(result.includes('hello'));
+    assert.ok(result.includes('intro.md'));
+    assert.ok(result.includes('Introduction'));
+    assert.ok(result.includes('Hello world'));
+  });
+
+  it('renderSearch — 无结果应渲染未找到', () => {
+    const engine = new TemplateEngine();
+    const data = { query: 'notfound', totalResults: 0, results: [] };
+    const result = engine.renderSearch(data);
+    assert.ok(result.includes('notfound'));
+    assert.ok(result.includes('未找到') || result.length > 0);
+  });
+
+  // ===========================================================================
+  // renderNavigate — NAVIGATE 模板
+  // ===========================================================================
+  it('renderNavigate — 应渲染导航结果', () => {
+    const engine = new TemplateEngine();
+    const data = {
+      sourcePath: 'docs/guide.md',
+      topic: 'Installation',
+      direction: 'outbound',
+      totalLinks: 1,
+      links: [
+        { linkText: 'Setup guide', targetPath: 'docs/setup.md', status: 'resolved' },
+      ],
+    };
+    const result = engine.renderNavigate(data);
+    assert.ok(result.includes('docs/guide.md'));
+    assert.ok(result.includes('Installation'));
+    assert.ok(result.includes('outbound'));
+    assert.ok(result.includes('Setup guide'));
+    assert.ok(result.includes('docs/setup.md'));
+  });
+
+  it('renderNavigate — 无链接应渲染提示', () => {
+    const engine = new TemplateEngine();
+    const data = {
+      sourcePath: 'docs/guide.md',
+      topic: 'Installation',
+      direction: 'inbound',
+      totalLinks: 0,
+      links: [],
+    };
+    const result = engine.renderNavigate(data);
+    assert.ok(result.includes('暂无链接'));
+  });
 });

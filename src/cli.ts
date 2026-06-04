@@ -197,14 +197,6 @@ export function createCli(): Command {
               ? findNearestMdGraphRoot(process.env.CLAUDE_PROJECT_DIR)
               : findNearestMdGraphRoot(process.cwd()));
 
-          if (!projectRoot) {
-            process.stderr.write(JSON.stringify({
-              success: false,
-              error: 'No .md-graph project found. Run "md-graph init" first.',
-            }) + '\n');
-            process.exit(1);
-          }
-
           const startStdioServer = await getStartStdioServer();
           if (projectRoot) {
             const MdGraph = await getMdGraph();
@@ -213,6 +205,10 @@ export function createCli(): Command {
             startStdioServer(graph as any);
           } else {
             // 没有项目时仍启动服务器，工具调用时返回友好提示
+            process.stderr.write(JSON.stringify({
+              success: false,
+              error: 'No .md-graph project found. Run "md-graph init" first.',
+            }) + '\n');
             startStdioServer(null as any);
           }
           // 服务器持续运行直到 stdin 关闭

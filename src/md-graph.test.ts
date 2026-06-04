@@ -94,4 +94,29 @@ describe('MdGraph', () => {
     assert.equal(result.totalResults, 0);
     assert.equal(result.results.length, 0);
   });
+
+  // =========================================================================
+  // renderSearch / renderNavigate
+  // =========================================================================
+  it('renderSearch — 应返回格式化的搜索文本', async () => {
+    const result = await graph.renderSearch('Hello');
+    assert.ok(result.includes('Hello'), `应包含查询词: ${result}`);
+    assert.ok(result.includes('**'), '应包含 markdown 格式');
+  });
+
+  it('renderSearch — 空查询应返回未找到', async () => {
+    const result = await graph.renderSearch('');
+    assert.ok(result.includes('未找到') || result.includes('0 条'));
+  });
+
+  it('renderNavigate — 应返回格式化的导航文本', async () => {
+    // 先搜索到一个节点来获取 nodeId
+    await graph.status();
+    const searchResult = await graph.search('Hello');
+    if (searchResult.results.length > 0) {
+      const nodeId = searchResult.results[0].id;
+      const result = await graph.renderNavigate(nodeId, 'outbound', 1);
+      assert.ok(result.includes('文件关系'), `应包含文件关系: ${result}`);
+    }
+  });
 });

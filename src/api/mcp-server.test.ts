@@ -52,6 +52,9 @@ describe('McpServer', () => {
       sourceFileName: 'test.md',
     }),
     close: async () => {},
+    renderStatus: async () => '## 最近变更 (0 批)\n\n暂无变更记录。',
+    renderSearch: async (query: string) => `## 搜索结果: "${query}"\n\n找到 1 条匹配结果：\n\n- **test.md** (docs/test.md)\n  行 1-5 · Intro\n  > Hello\n`,
+    renderNavigate: async (nodeIdOrPath: number | string) => `## 文件关系: docs/test.md\n\n**主题**: Test\n**方向**: outbound\n**链接数**: 1\n\n- [Other](docs/other.md) [resolved]\n`,
   };
 
   after(() => {
