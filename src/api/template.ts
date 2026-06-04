@@ -159,23 +159,42 @@ export class TemplateEngine {
     result += `文件主题: ${topic}\n\n`;
     result += `### ${directionLabel} (depth=${depth})\n\n`;
 
-    if (links.length === 0) {
+    // 按 targetPath 去重合并：同目标的链接聚合行号和链接文字
+    const merged = new Map<string, {
+      tfn: string; tp: string; slrs: string[]; lts: Set<string>; tt: string;
+    }>();
+    for (const l of links) {
+      const tp = l['targetPath'] as string ?? l['linkText'] as string ?? '';
+      if (!merged.has(tp)) {
+        merged.set(tp, {
+          tfn: l['targetFileName'] as string ?? '',
+          tp,
+          slrs: [],
+          lts: new Set(),
+          tt: l['targetTopic'] as string ?? '',
+        });
+      }
+      const m = merged.get(tp)!;
+      const slr = l['sourceLineRanges'] as string ?? '';
+      if (slr && !m.slrs.includes(slr)) m.slrs.push(slr);
+      const lt = l['linkText'] as string ?? '';
+      if (lt) m.lts.add(lt);
+    }
+
+    if (merged.size === 0) {
       result += 'Navigation Results (0 links found for this file)\n';
     } else {
-      for (const l of links) {
-        const tfn = l['targetFileName'] as string ?? '';
-        const tp = l['targetPath'] as string ?? '';
-        const slr = l['sourceLineRanges'] as string ?? '';
-        const lt = l['linkText'] as string ?? '';
-        const tt = l['targetTopic'] as string ?? '';
-
-        result += `- → **${tfn}** (${tp})\n`;
-        result += `  行 ${slr} · 链接文字: "${lt}"\n`;
-        result += `  主题: ${tt}\n`;
+      for (const m of merged.values()) {
+        result += `- → **${m.tfn || m.tp}** (${m.tp})\n`;
+        const slrStr = m.slrs.join(', ');
+        if (slrStr) result += `  行 ${slrStr}`;
+        if (m.lts.size > 0) result += ` · "${[...m.lts].join('", "')}"`;
+        result += '\n';
+        if (m.tt) result += `  主题: ${m.tt}\n`;
       }
     }
 
-    result += `\n共 ${totalLinks} 条${directionLabel}。\n`;
+    result += `\n共 ${merged.size} 条${directionLabel}。\n`;
 
 
     // _next 引导块（ADR-012，DI 模板架构 6.）
