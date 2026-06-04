@@ -125,8 +125,10 @@ export class TemplateEngine {
         const rl = r['related_line'] as string ?? '';
 
         result += `${index}. **${fn}** (${fp}) 行 ${lr} · 相关度 ${score}\n`;
-        result += `   所属: ${hp}\n`;
-        result += `   片段: ${snippet}\n`;
+        if (hp) result += `   所属: ${hp}\n`;
+        // snippet 是相关性证据，加 … 边框标记截断
+        result += `   匹配: …${snippet}…\n`;
+        if (rl) result += `   ${rl}\n`;
         if (rl) result += `   ${rl}\n`;
         index++;
       }
@@ -134,9 +136,9 @@ export class TemplateEngine {
 
 
     // _next 引导块（ADR-012，DI 模板架构 6.）
-    result += '\n【务必】使用 Read 工具读取上方文件路径和行号查看完整上下文。高相关度结果优先阅读。';
+    result += '\n【务必】根据匹配行判断文件是否相关——匹配行是相关性证据，不是完整内容。只 Read 通过判断的文件。';
     if (navigateHint) result += navigateHint;
-    result += '\n【不要】仅凭片段判断完整内容——snippet 是截断的上下文。不要只看第一条——查看全部结果后再决定关注哪些文件。';
+    result += '\n【不要】逐条 Read 全部结果——用匹配行快速筛选，只 Read 真正相关的文件。';
 
     return result;
   }

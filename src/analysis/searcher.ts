@@ -81,13 +81,13 @@ export class Searcher {
   }
 
   // =========================================================================
-  // generateSnippet — 生成匹配上下文的摘要片段
-  // 在匹配词周围提取上下文窗口中内容
+  // generateSnippet — 匹配词居中 ±80 字符，句边界对齐
+  // 原则：snippet 是相关性证据，不是内容预览
   // =========================================================================
   generateSnippet(
     content: string,
     query: string,
-    maxLength: number = 200,
+    maxLength: number = 160,
   ): string {
     if (!content) return '';
 
@@ -95,28 +95,51 @@ export class Searcher {
     const idx = content.toLowerCase().indexOf(q);
 
     if (idx === -1) {
-      // 无匹配，返回截断内容
-      return content.length <= maxLength ? content : content.slice(0, maxLength - 3) + '...';
+      return content.length <= maxLength ? content : content.slice(0, maxLength);
     }
 
-    // 在匹配词周围取上下文窗口
     const matchEnd = idx + q.length;
-    const contextSize = Math.floor((maxLength - q.length) / 2);
+    const margin = Math.floor((maxLength - q.length) / 2);
 
-    let start = Math.max(0, idx - contextSize);
-    let end = Math.min(content.length, matchEnd + contextSize);
+    let start = Math.max(0, idx - margin);
+    let end = Math.min(content.length, matchEnd + margin);
 
-    // 如果 maxLength 够大，可能需要二次调整
-    if (end - start > maxLength) {
-      // 优先保留前面部分
-      end = start + maxLength;
+    // 句边界对齐：在 start 和 end 附近找最近的句子分隔符
+    const SENTENCE_BOUNDARY = /[。！？.!?\n]/g;
+    const snapWindow = 20;
+
+    // start 向前对齐到句边界（在 snapWindow 内）
+    for (let i = start; i < Math.min(start + snapWindow, idx); i++) {
+      if (SENTENCE_BOUNDARY.test(content[i])) { start = i + 1; break; }
+    }
+    // end 向后对齐到句边界
+    for (let i = end; i > Math.max(end - snapWindow, matchEnd); i--) {
+      if (SENTENCE_BOUNDARY.test(content[i])) { end = i + 1; break; }
     }
 
     let snippet = content.slice(start, end);
 
-    // 添加省略号
-    if (start > 0) snippet = '...' + snippet;
-    if (end < content.length) snippet = snippet + '...';
+    // 回退到词边界：避免从单词中间截断
+    const WORD_BOUNDARY = /[\s,;:(){}[\]<>"'`]/;
+    if (start > 0 && !WORD_BOUNDARY.test(snippet[0] || '')) {
+      const firstSpace = snippet.search(/[\s,;:]/);
+      if (firstSpace > 0 && firstSpace < 10) snippet = snippet.slice(firstSpace);
+    }
+    if (end < content.length && !WORD_BOUNDARY.test(snippet[snippet.length - 1] || '')) {
+      const lastSpace = snippet.search(/[\s,;:]$/);
+      if (lastSpace < 0) {
+        // 向前找最近的词边界
+        for (let i = snippet.length - 1; i > snippet.length - 10; i--) {
+          if (WORD_BOUNDARY.test(snippet[i])) { snippet = snippet.slice(0, i); break; }
+        }
+      }
+    }
+
+    snippet = snippet.trim();
+
+    // 只在真正截断时加 …
+    if (start > 0) snippet = '…' + snippet;
+    if (end < content.length) snippet = snippet + '…';
 
     return snippet;
   }
