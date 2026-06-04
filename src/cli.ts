@@ -205,14 +205,16 @@ export function createCli(): Command {
             process.exit(1);
           }
 
-          const MdGraph = await getMdGraph();
-          const graph = new MdGraph(projectRoot);
-          await graph.init();
-
           const startStdioServer = await getStartStdioServer();
-          // MdGraph 实现了 MdGraphFacade 的所有方法，类型差异仅在于
-          // search() 返回的具体类型不同，使用 as any 安全转换
-          startStdioServer(graph as any);
+          if (projectRoot) {
+            const MdGraph = await getMdGraph();
+            const graph = new MdGraph(projectRoot);
+            await graph.init();
+            startStdioServer(graph as any);
+          } else {
+            // 没有项目时仍启动服务器，工具调用时返回友好提示
+            startStdioServer(null as any);
+          }
           // 服务器持续运行直到 stdin 关闭
         } else {
           process.stderr.write(JSON.stringify({

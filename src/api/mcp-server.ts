@@ -83,14 +83,14 @@ export interface MdGraphFacade {
 // McpServer
 // =============================================================================
 export class McpServer {
-  private graph: MdGraphFacade;
+  private graph: MdGraphFacade | null;
   private templateEngine: TemplateEngine;
   private serverInfo = {
     name: 'md-graph-mcp',
     version: '0.1.0',
   };
 
-  constructor(graph: MdGraphFacade) {
+  constructor(graph: MdGraphFacade | null) {
     this.graph = graph;
     this.templateEngine = new TemplateEngine();
   }
@@ -252,8 +252,16 @@ export class McpServer {
   // 内部方法 — 工具调用
   // =========================================================================
 
+  /** 无项目时返回友好提示 */
+  private noProject(): ToolResult {
+    return {
+      content: [{ type: 'text', text: '## md-graph 未初始化\n\n当前项目尚未运行 `md-graph init`。请在有 Markdown 文档的项目目录下运行：\n\n```bash\ncd /path/to/your/project\nmd-graph init\n```\n\n之后再重新连接 MCP 服务器。' }],
+    };
+  }
+
   /** 调用 md_status 工具 */
   private async callStatus(): Promise<ToolResult> {
+    if (!this.graph) return this.noProject();
     const text = await this.graph.renderStatus();
     return {
       content: [{ type: 'text', text }],
@@ -262,6 +270,7 @@ export class McpServer {
 
   /** 调用 md_search 工具 */
   private async callSearch(args: Record<string, unknown>): Promise<ToolResult> {
+    if (!this.graph) return this.noProject();
     const query = args.query as string | undefined;
     if (!query) {
       throw new Error('Missing required parameter: query');
@@ -281,6 +290,7 @@ export class McpServer {
 
   /** 调用 md_navigate 工具 */
   private async callNavigate(args: Record<string, unknown>): Promise<ToolResult> {
+    if (!this.graph) return this.noProject();
     const nodeId = args.nodeId as number | undefined;
     const path = args.path as string | undefined;
     const direction = args.direction as string | undefined;
