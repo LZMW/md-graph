@@ -37,7 +37,7 @@ export class Indexer {
   // fullIndex — 全量索引
   // 扫描所有 .md 文件，解析并写入数据库
   // =========================================================================
-  async fullIndex(rootPath?: string): Promise<IndexResult> {
+  async fullIndex(rootPath?: string, force?: boolean): Promise<IndexResult> {
     const startTime = Date.now();
     const scanRoot = rootPath || this.fileStore['rootPath'];
     const mdFiles = await this.discoverMdFiles(scanRoot);
@@ -49,7 +49,9 @@ export class Indexer {
 
     for (const relPath of mdFiles) {
       try {
-        const changed = await this.indexFileIfChanged(relPath);
+        const changed = force ? true : await this.indexFileIfChanged(relPath);
+        // force 模式：总是重新索引。非 force：仅在 hash 变化时索引
+        if (force) await this.indexSingleFile(relPath);
         if (changed) {
           indexedCount++;
         } else {
@@ -373,6 +375,7 @@ export class Indexer {
         heading_level: node.headingLevel ?? null,
         heading_path: node.headingPath ?? null,
         line_ranges: lineRanges,
+        inline_tokens: node.inlineTokens ?? null,
       });
       parsedIdToDbId.set(nodeId, result.id);
       insertedNodeIds.push(result.id);

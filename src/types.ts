@@ -339,6 +339,7 @@ export interface NodeInsert {
     heading_level?: number | null;
     heading_path?: string | null;
     line_ranges?: string | null;
+    inline_tokens?: string | null;
 }
 
 export interface EdgeInsert {

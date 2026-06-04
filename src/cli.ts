@@ -40,7 +40,7 @@ export async function cmdInit(
   await graph.init();
 
   if (!exists || options?.force) {
-    const result = await graph.fullIndex(resolvedPath);
+    const result = await graph.fullIndex(resolvedPath, options?.force);
     await graph.close();
     return {
       ok: true,

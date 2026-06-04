@@ -159,9 +159,9 @@ export class SqliteDbAdapter {
   insertNode(nodeData: NodeInsert): { id: number } {
     const stmt = this.db.prepare(`
       INSERT INTO doc_nodes (file_id, type, line_start, line_end, col_start, col_end,
-                             searchable, parent_id, ordinal, heading_level, heading_path, line_ranges)
+                             searchable, parent_id, ordinal, heading_level, heading_path, line_ranges, inline_tokens)
       VALUES (@file_id, @type, @line_start, @line_end, @col_start, @col_end,
-              @searchable, @parent_id, @ordinal, @heading_level, @heading_path, @line_ranges)
+              @searchable, @parent_id, @ordinal, @heading_level, @heading_path, @line_ranges, @inline_tokens)
     `);
     const result = stmt.run({
       file_id: nodeData.file_id,
@@ -176,6 +176,7 @@ export class SqliteDbAdapter {
       heading_level: nodeData.heading_level ?? null,
       heading_path: nodeData.heading_path ?? null,
       line_ranges: nodeData.line_ranges ?? null,
+      inline_tokens: nodeData.inline_tokens ?? null,
     });
     return { id: Number(result.lastInsertRowid) };
   }
@@ -183,9 +184,9 @@ export class SqliteDbAdapter {
   insertNodes(nodes: NodeInsert[]): number[] {
     const stmt = this.db.prepare(`
       INSERT INTO doc_nodes (file_id, type, line_start, line_end, col_start, col_end,
-                             searchable, parent_id, ordinal, heading_level, heading_path, line_ranges)
+                             searchable, parent_id, ordinal, heading_level, heading_path, line_ranges, inline_tokens)
       VALUES (@file_id, @type, @line_start, @line_end, @col_start, @col_end,
-              @searchable, @parent_id, @ordinal, @heading_level, @heading_path, @line_ranges)
+              @searchable, @parent_id, @ordinal, @heading_level, @heading_path, @line_ranges, @inline_tokens)
     `);
 
     const ids: number[] = [];
@@ -204,6 +205,7 @@ export class SqliteDbAdapter {
           heading_level: item.heading_level ?? null,
           heading_path: item.heading_path ?? null,
           line_ranges: item.line_ranges ?? null,
+          inline_tokens: item.inline_tokens ?? null,
         });
         ids.push(Number(result.lastInsertRowid));
       }

@@ -164,9 +164,9 @@ export class MdGraph {
   // =========================================================================
   // fullIndex — 全量索引
   // =========================================================================
-  async fullIndex(rootPath?: string): Promise<IndexResult> {
+  async fullIndex(rootPath?: string, force?: boolean): Promise<IndexResult> {
     await this.ensureInitialized();
-    return this.indexer.fullIndex(rootPath ?? this.rootPath);
+    return this.indexer.fullIndex(rootPath ?? this.rootPath, force);
   }
 
   // =========================================================================
