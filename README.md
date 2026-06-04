@@ -54,7 +54,7 @@ claude mcp remove md-graph            # 移除 MCP 注册
 
 ### 核心设计哲学
 
-**md-graph 只负责定位，Read 负责阅读。** md_status 定位变更 → agent 用 Read 读取变更内容；md_search 定位搜索命中 → agent 用 Read 读取命中段落；md_navigate 定位关联文档 → agent 用 Read 读取关联文档。md-graph 不做超越"定位"能力的事——那是 Read 工具的工作。
+**md-graph 只负责定位，Read 负责阅读。** md_status 定位变更 → agent 用 Read 读取变更内容；md_search 定位搜索命中 → agent 用 Read 读取命中段落；md_navigate 定位关联文档 → agent 用 Read 读取关联文档。所有输出均为自然语言模板，内置 `【务必】`/`【不要】` 引导块告诉 agent 下一步做什么。搜索结果的 snippet 是相关性证据（匹配词居中 ±80 字符），不是内容预览——agent 用它判断文件值不值得 Read。staleness 只在索引真正过期时提示，正常状态静默。
 
 ---
 
@@ -90,9 +90,10 @@ claude mcp remove md-graph            # 移除 MCP 注册
 
 | 工具 | 意图（你想做什么） | 示例 |
 |------|-------------------|------|
-| `md_status` | 查看最近变更文档和索引状态 | `md_status({ batches: 2 })` |
-| `md_search` | 跨所有 MD 文件全文搜索关键词 | `md_search({ query: "staleness" })` |
-| `md_navigate` | 浏览文档的出链/入链关系 | `md_navigate({ path: "docs/guide.md", direction: "outbound" })` |
+| `md_status` | 会话唤醒入口：最近变更 + 高频关键词 | `md_status({ batches: 2 })` |
+| `md_files` | 已索引 MD 文件全貌：目录树 + H1 主题 + 外链数 | `md_files()` |
+| `md_search` | 跨文件全文搜索，匹配词居中 snippet | `md_search({ query: "staleness" })` |
+| `md_navigate` | 出链/入链关系，同目标去重合并 | `md_navigate({ path: "docs/guide.md", direction: "outbound" })` |
 
 ### md_status — 变更感知入口
 
@@ -122,6 +123,12 @@ claude mcp remove md-graph            # 移除 MCP 注册
 | `direction` | string | 是 | — | `inbound` / `outbound` |
 | `depth` | number | 否 | 1 | BFS 遍历深度（最大 30） |
 | `maxResults` | number | 否 | 20 | 最大返回链接数（最大 100） |
+
+### md_files — 文件全貌
+
+首次进入项目时了解已索引文档的目录结构。返回文件树、H1 标题主题、外链数量、最近 30 分钟增删改标记（✚/✎/✕）。
+
+**参数**: 无
 
 ---
 
