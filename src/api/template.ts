@@ -18,9 +18,6 @@ export class TemplateEngine {
   renderStatus(data: Record<string, unknown>): string {
     const batches = (data['batches'] as Array<Record<string, unknown>>) ?? [];
     const batchCount = data['batchCount'] ?? batches.length;
-    const stale = data['stale'] as boolean ?? false;
-    const staleFileCount = data['staleFileCount'] as number ?? 0;
-    const lastIndexedAt = data['lastIndexedAt'] as string ?? '';
     const searchHint = (data['search_hint'] as string) ?? '';
 
     let result = `## 最近变更 (${batchCount} 批)\n\n`;
@@ -56,10 +53,6 @@ export class TemplateEngine {
       }
     }
 
-    // staleness 只在过期时提示（裁决 #6），新鲜时静默——agent 不需要无意义的元数据
-    if (stale || staleFileCount > 0) {
-      result += `\n⚠ 索引已过期: ${staleFileCount} 个文件。以文件系统为准，使用 Read 读取最新内容。watcher 将自动更新。`;
-    }
 
     // _next 引导块（ADR-012，DI 模板架构 6.）
     result += `\n【务必】使用 Read 工具读取上方文件路径和行号，如有必要直接查看文件全部内容。${searchHint}\n`;
@@ -77,9 +70,6 @@ export class TemplateEngine {
     const totalResults = data['totalResults'] as number ?? 0;
     const results = (data['results'] as Array<Record<string, unknown>>) ?? [];
     const navigateHint = (data['navigate_hint'] as string) ?? '';
-    const stale = data['stale'] as boolean ?? false;
-    const staleFileCount = data['staleFileCount'] as number ?? 0;
-    const lastIndexedAt = data['lastIndexedAt'] as string ?? '';
 
     let result = `## 搜索 "${query}" — ${totalResults} 条结果\n\n`;
 
@@ -105,10 +95,6 @@ export class TemplateEngine {
       }
     }
 
-    // staleness 只在过期时提示（裁决 #6），新鲜时静默——agent 不需要无意义的元数据
-    if (stale || staleFileCount > 0) {
-      result += `\n⚠ 索引已过期: ${staleFileCount} 个文件。以文件系统为准，使用 Read 读取最新内容。watcher 将自动更新。`;
-    }
 
     // _next 引导块（ADR-012，DI 模板架构 6.）
     result += '\n【务必】使用 Read 工具读取上方文件路径和行号查看完整上下文。高相关度结果优先阅读。';
@@ -129,9 +115,6 @@ export class TemplateEngine {
     const depth = data['depth'] as number ?? 1;
     const totalLinks = data['totalLinks'] as number ?? 0;
     const links = (data['links'] as Array<Record<string, unknown>>) ?? [];
-    const stale = data['stale'] as boolean ?? false;
-    const staleFileCount = data['staleFileCount'] as number ?? 0;
-    const lastIndexedAt = data['lastIndexedAt'] as string ?? '';
 
     const directionLabel = direction === 'inbound' ? '入链' : '出链';
 
@@ -157,10 +140,6 @@ export class TemplateEngine {
 
     result += `\n共 ${totalLinks} 条${directionLabel}。\n`;
 
-    // staleness 只在过期时提示（裁决 #6），新鲜时静默——agent 不需要无意义的元数据
-    if (stale || staleFileCount > 0) {
-      result += `\n⚠ 索引已过期: ${staleFileCount} 个文件。以文件系统为准，使用 Read 读取最新内容。watcher 将自动更新。`;
-    }
 
     // _next 引导块（ADR-012，DI 模板架构 6.）
     result += '\n【务必】使用 Read 工具读取上方目标文件。depth 参数可扩大遍历层数。如需查看反向关系，使用相反的 direction。\n';
