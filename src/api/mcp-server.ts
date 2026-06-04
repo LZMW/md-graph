@@ -184,7 +184,7 @@ export class McpServer {
 
   /** 处理 tools/call 请求 */
   private async handleToolsCall(request: JsonRpcRequest): Promise<JsonRpcResponse> {
-    const params = request.params as { name?: string; arguments?: Record<string, unknown> } | undefined;
+    const params = request.params as Record<string, unknown> | undefined;
 
     if (!params || !params.name) {
       return {
@@ -197,8 +197,9 @@ export class McpServer {
       };
     }
 
-    const toolName = params.name;
-    const args = params.arguments ?? {};
+    const toolName = params.name as string;
+    // 兼容两种传参格式：{ arguments: {...} } 和顶层 {...}
+    const args = (params.arguments as Record<string, unknown>) ?? params;
 
     try {
       let result: ToolResult;

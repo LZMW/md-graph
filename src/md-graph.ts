@@ -18,6 +18,7 @@ import type {
   SearchResult,
   SearchOptions,
   NavResult,
+  NavLink,
   Direction,
   IndexResult,
   StalenessInfo,
@@ -251,7 +252,7 @@ export class MdGraph {
     if (typeof nodeIdOrPath === 'number') {
       nodeId = nodeIdOrPath;
     } else {
-      // 通过文件路径查找 nodeId
+      // 通过文件路径查找：聚合文件中所有节点的链接
       const fileRecord = this.db.getFileByPath(nodeIdOrPath);
       if (!fileRecord) {
         return `## 文件关系: ${nodeIdOrPath}\n\n未找到文件。请检查路径是否正确。`;
@@ -260,7 +261,52 @@ export class MdGraph {
       if (nodes.length === 0) {
         return `## 文件关系: ${nodeIdOrPath}\n\n文件中未找到可导航的节点。`;
       }
-      nodeId = nodes[0].id;
+
+      // 聚合文件中所有节点的链接
+      const allLinks: NavLink[] = [];
+      const seenTargets = new Set<string>();
+      for (const node of nodes) {
+        const nav = await this.navigate(
+          node.id,
+          direction as 'inbound' | 'outbound' | 'impact',
+          depth,
+        );
+        for (const l of nav.links) {
+          const key = `${l.linkText}|${l.targetPath}`;
+          if (!seenTargets.has(key)) {
+            seenTargets.add(key);
+            allLinks.push(l);
+          }
+        }
+      }
+
+      const staleInfo = mergeStaleness(
+        checkStaleness(this.rootPath, this.db.getFileStamps()),
+        this.db.getStaleInfo().lastIndexedAt,
+      );
+
+      const fileName = nodeIdOrPath.replace(/\\/g, '/').split('/').pop() || nodeIdOrPath;
+      const topic = fileName;
+
+      return this.template.renderNavigate({
+        fileName,
+        sourcePath: nodeIdOrPath,
+        topic,
+        direction,
+        depth,
+        totalLinks: allLinks.length,
+        links: allLinks.map((l) => ({
+          linkText: l.linkText,
+          targetPath: l.targetPath,
+          targetFileName: l.targetFileName,
+          sourceLineRanges: l.sourceLineRanges,
+          targetTopic: l.targetTopic,
+          status: l.status,
+        })),
+        stale: staleInfo.stale,
+        staleFileCount: staleInfo.staleFileCount,
+        lastIndexedAt: staleInfo.lastIndexedAt,
+      });
     }
 
     const navResult = await this.navigate(
