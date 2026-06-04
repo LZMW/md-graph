@@ -199,16 +199,21 @@ export class McpServer {
     }
 
     const toolName = params.name as string;
-    // 兼容三种传参格式：arguments 是对象、arguments 是 JSON 字符串、顶层平铺
+    // 兼容传参格式：Claude Code 用 { arguments: { params: {...} } }
     let args: Record<string, unknown> = {};
-    if (params.arguments) {
-      if (typeof params.arguments === 'string') {
-        try { args = JSON.parse(params.arguments); } catch { args = {}; }
+    const rawArgs = params.arguments as Record<string, unknown> | undefined;
+    if (rawArgs) {
+      // arguments.params 是实际参数（Claude Code 格式）
+      if (rawArgs.params && typeof rawArgs.params === 'object') {
+        args = rawArgs.params as Record<string, unknown>;
       } else {
-        args = params.arguments as Record<string, unknown>;
+        args = rawArgs;
       }
     } else {
-      args = params as Record<string, unknown>;
+      // fallback: 顶层平铺（排除 name 等系统字段）
+      for (const [k, v] of Object.entries(params)) {
+        if (k !== 'name' && k !== 'arguments' && k !== '_meta') args[k] = v;
+      }
     }
 
     try {
