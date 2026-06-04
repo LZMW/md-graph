@@ -656,12 +656,26 @@ export class SqliteDbAdapter {
         : types.has('added') ? 'added'
         : 'deleted';
 
-      // 聚合行号区间（去重，取前 5 个，超出标 …）
-      const lrSet = new Set<string>();
+      // 聚合行号区间：解析为 [start,end] 对，合并相邻区间
+      const ranges: Array<[number, number]> = [];
       for (const d of details) {
-        if (d.lineRanges) lrSet.add(d.lineRanges);
+        if (!d.lineRanges) continue;
+        const m = d.lineRanges.match(/^(\d+)-(\d+)$/);
+        if (m) ranges.push([parseInt(m[1]), parseInt(m[2])]);
       }
-      const lrList = [...lrSet].filter(Boolean);
+      ranges.sort((a, b) => a[0] - b[0]);
+      const merged: Array<[number, number]> = [];
+      for (const r of ranges) {
+        if (merged.length === 0) { merged.push([...r]); continue; }
+        const last = merged[merged.length - 1];
+        // 相邻或重叠：合并（间距 ≤ 2 行视为连续）
+        if (r[0] <= last[1] + 2) {
+          last[1] = Math.max(last[1], r[1]);
+        } else {
+          merged.push([...r]);
+        }
+      }
+      const lrList = merged.map(([s, e]) => s === e ? `${s}` : `${s}-${e}`);
       const lineRanges = lrList.length <= 5
         ? lrList.join(', ')
         : lrList.slice(0, 5).join(', ') + ` …等 ${lrList.length} 处`;
@@ -838,29 +852,19 @@ function compactHeadingPaths(paths: string[]): string {
     }
   }
 
-  // 格式化树为紧凑字符串
-  function formatNode(node: HpNode): string {
-    const childNames = [...node.children.keys()];
-    if (childNames.length === 0) return node.name;
+  // 只展示一级子节点 + 子树节点数，不展开深层名称（agent 用 md_search 定位细节）
+  const totalSubCount = (node: HpNode): number => {
+    let count = node.children.size;
+    for (const child of node.children.values()) count += totalSubCount(child);
+    return count;
+  };
 
-    const parts: string[] = [];
-    for (const [name, child] of node.children) {
-      const sub = formatNode(child);
-      if (sub === name) {
-        parts.push(name);
-      } else {
-        // 子节点名 = 父 + 子格式化结果（用括号包裹多个孙节点）
-        parts.push(sub);
-      }
-    }
-    return parts.join(', ');
-  }
-
-  // 收集顶层分组
+  const truncate = (s: string, max: number) => s.length <= max ? s : s.slice(0, max - 1) + '…';
   const groups: string[] = [];
   for (const [name, child] of root.children) {
-    const sub = formatNode(child);
-    groups.push(sub === name ? name : `${name}(${sub})`);
+    const shortName = truncate(name, 24);
+    const subCount = totalSubCount(child);
+    groups.push(subCount > 0 ? `${shortName}(+${subCount})` : shortName);
   }
 
   const totalGroups = groups.length;

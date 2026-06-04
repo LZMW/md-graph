@@ -7,6 +7,36 @@
 // =============================================================================
 
 // =============================================================================
+// extractKeywordsFromFiles — 从变更文件的 headingPath 提取关键词
+// =============================================================================
+function extractKeywordsFromFiles(files: Array<Record<string, unknown>>): string[] {
+  const seen = new Set<string>();
+  const keywords: string[] = [];
+  for (const f of files) {
+    const hp = (f['headingPath'] as string) ?? '';
+    // headingPath 格式: "公共前缀 > 子节点1(+N), 子节点2"
+    const parts = hp.split(' > ');
+    const lastPart = parts[parts.length - 1] || hp;
+    for (const segment of lastPart.split(', ')) {
+      let name = segment.replace(/\s*\(\+?\d+\)\s*/g, '').trim();
+      // 截断过长的标题名（>20 字符），取有意义的前面部分
+      if (name.length > 20) {
+        const sep = name.indexOf(' — ');
+        name = sep > 0 ? name.slice(0, sep) : name.slice(0, 18) + '…';
+      }
+      if (name && name.length > 1 && !name.startsWith('…')) {
+        if (!seen.has(name)) {
+          seen.add(name);
+          keywords.push(name);
+        }
+      }
+    }
+    if (keywords.length >= 8) break;
+  }
+  return keywords;
+}
+
+// =============================================================================
 // TemplateEngine
 // =============================================================================
 export class TemplateEngine {
@@ -54,8 +84,15 @@ export class TemplateEngine {
     }
 
 
-    // _next 引导块（ADR-012，DI 模板架构 6.）
-    result += `\n【务必】使用 Read 工具读取上方文件路径和行号，如有必要直接查看文件全部内容。${searchHint}\n`;
+    // _next 引导块：从涉及字段提取关键词，给 agent 具体的搜索方向
+    const keywords = extractKeywordsFromFiles(
+      (batches as Array<Record<string, unknown>>)
+        .flatMap(b => (b['files'] as Array<Record<string, unknown>>) ?? [])
+    );
+    const searchTip = keywords.length > 0
+      ? `变更关键节点: ${keywords.join(', ')}。可调用 md_search 精确定位变更。`
+      : searchHint;
+    result += `\n【务必】使用 Read 工具读取上方文件。${searchTip}\n`;
     result += '【不要】假设以上文件列表完整——未出现在变更列表中的文件可能仍包含相关内容。';
 
     return result;
