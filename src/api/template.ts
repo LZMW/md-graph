@@ -56,8 +56,10 @@ export class TemplateEngine {
       }
     }
 
-    // staleness 元数据行（裁决 #6，DI 模板架构 5. 元数据行在 _next 之前）
-    result += `\n索引状态: ${stale ? '过期' : '新鲜'} | 过期文件数: ${staleFileCount} | 最后索引时间: ${lastIndexedAt}\n`;
+    // staleness 只在过期时提示（裁决 #6），新鲜时静默——agent 不需要无意义的元数据
+    if (stale || staleFileCount > 0) {
+      result += `\n⚠ 索引已过期: ${staleFileCount} 个文件。以文件系统为准，使用 Read 读取最新内容。watcher 将自动更新。`;
+    }
 
     // _next 引导块（ADR-012，DI 模板架构 6.）
     result += `\n【务必】使用 Read 工具读取上方文件路径和行号，如有必要直接查看文件全部内容。${searchHint}\n`;
@@ -103,8 +105,10 @@ export class TemplateEngine {
       }
     }
 
-    // staleness 元数据行（裁决 #6，DI 模板架构 5. 元数据行在 _next 之前）
-    result += `\n索引状态: ${stale ? '过期' : '新鲜'} | 过期文件数: ${staleFileCount} | 最后索引时间: ${lastIndexedAt}\n`;
+    // staleness 只在过期时提示（裁决 #6），新鲜时静默——agent 不需要无意义的元数据
+    if (stale || staleFileCount > 0) {
+      result += `\n⚠ 索引已过期: ${staleFileCount} 个文件。以文件系统为准，使用 Read 读取最新内容。watcher 将自动更新。`;
+    }
 
     // _next 引导块（ADR-012，DI 模板架构 6.）
     result += '\n【务必】使用 Read 工具读取上方文件路径和行号查看完整上下文。高相关度结果优先阅读。';
@@ -153,8 +157,10 @@ export class TemplateEngine {
 
     result += `\n共 ${totalLinks} 条${directionLabel}。\n`;
 
-    // staleness 元数据行（裁决 #6，DI 模板架构 5. 元数据行在 _next 之前）
-    result += `\n索引状态: ${stale ? '过期' : '新鲜'} | 过期文件数: ${staleFileCount} | 最后索引时间: ${lastIndexedAt}\n`;
+    // staleness 只在过期时提示（裁决 #6），新鲜时静默——agent 不需要无意义的元数据
+    if (stale || staleFileCount > 0) {
+      result += `\n⚠ 索引已过期: ${staleFileCount} 个文件。以文件系统为准，使用 Read 读取最新内容。watcher 将自动更新。`;
+    }
 
     // _next 引导块（ADR-012，DI 模板架构 6.）
     result += '\n【务必】使用 Read 工具读取上方目标文件。depth 参数可扩大遍历层数。如需查看反向关系，使用相反的 direction。\n';

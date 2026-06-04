@@ -44,7 +44,7 @@ describe('TemplateEngine', () => {
     assert.ok(result.includes('Introduction'));
     assert.ok(result.includes('【务必】'));
     assert.ok(result.includes('【不要】'));
-    assert.ok(result.includes('索引状态: 新鲜'));
+    // stale=false 时不显示 staleness 行，agent 不需要无意义元数据
   });
 
   it('renderStatus — 空批次应渲染提示', () => {
@@ -79,7 +79,7 @@ describe('TemplateEngine', () => {
     assert.ok(result.includes('1.5'));
     assert.ok(result.includes('【务必】'));
     assert.ok(result.includes('【不要】'));
-    assert.ok(result.includes('索引状态: 新鲜'));
+    // stale=false 时不显示 staleness 行，agent 不需要无意义元数据
   });
 
   it('renderSearch — 无结果应渲染未找到', () => {
@@ -118,7 +118,7 @@ describe('TemplateEngine', () => {
     assert.ok(result.includes('Setup guide'));
     assert.ok(result.includes('【务必】'));
     assert.ok(result.includes('【不要】'));
-    assert.ok(result.includes('索引状态: 新鲜'));
+    // stale=false 时不显示 staleness 行，agent 不需要无意义元数据
   });
 
   it('renderNavigate — 无链接应渲染提示', () => {
