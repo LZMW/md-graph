@@ -90,9 +90,9 @@ export class TemplateEngine {
         .flatMap(b => (b['files'] as Array<Record<string, unknown>>) ?? [])
     );
     const searchTip = keywords.length > 0
-      ? `变更关键节点: ${keywords.join(', ')}。可调用 md_search 精确定位变更。`
+      ? `变更关键节点: ${keywords.join(', ')}。可调用 md_search 查找这些概念在项目其他文件中的引用。`
       : searchHint;
-    result += `\n【务必】使用 Read 工具读取上方文件。${searchTip}\n`;
+    result += `\n【务必】使用 Read 工具读取上方文件查看具体变更。${searchTip}\n`;
     result += '【不要】假设以上文件列表完整——未出现在变更列表中的文件可能仍包含相关内容。';
 
     return result;
