@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import type {
   FileInsert,
   FileRecord,
+  FileTreeNode,
   NodeInsert,
   NodeRecord,
   EdgeInsert,
@@ -456,6 +457,125 @@ export class SqliteDbAdapter {
     `).all() as Array<{ path: string; size: number; mtimeMs: number; status: string }>;
   }
 
+  /** 获取文件树概览：路径树 + H1 主题 + 外链数 + 最近变更标记 */
+  getFileTree(sinceTimestamp?: string): {
+    tree: FileTreeNode[];
+    recentAdded: number;
+    recentModified: number;
+    recentDeleted: number;
+    totalFiles: number;
+  } {
+    const since = sinceTimestamp || new Date(Date.now() - 30 * 60 * 1000).toISOString();
+
+    // 活跃文件
+    const activeFiles = this.db.prepare(`
+      SELECT f.id, f.path, f.indexed_at, f.status
+      FROM files f WHERE f.status = 'active'
+      ORDER BY f.path
+    `).all() as Array<{ id: number; path: string; indexed_at: string; status: string }>;
+
+    // 最近删除的文件
+    const deletedFiles = this.db.prepare(`
+      SELECT f.id, f.path, f.indexed_at
+      FROM files f WHERE f.status = 'deleted' AND f.indexed_at > ?
+      ORDER BY f.path
+    `).all(since) as Array<{ id: number; path: string; indexed_at: string }>;
+
+    // 每个文件的外链数
+    const linkCounts = new Map<number, number>();
+    const linkRows = this.db.prepare(`
+      SELECT n.file_id, COUNT(DISTINCT e.id) as cnt
+      FROM edges e
+      JOIN doc_nodes n ON n.id = e.source_node_id
+      GROUP BY n.file_id
+    `).all() as Array<{ file_id: number; cnt: number }>;
+    for (const r of linkRows) linkCounts.set(r.file_id, r.cnt);
+
+    // 每个文件的 H1 主题
+    const topics = new Map<number, string>();
+    const topicRows = this.db.prepare(`
+      SELECT file_id, heading_path FROM doc_nodes
+      WHERE type = 'heading' AND heading_level = 1
+    `).all() as Array<{ file_id: number; heading_path: string }>;
+    for (const r of topicRows) topics.set(r.file_id, r.heading_path);
+
+    let recentAdded = 0;
+    let recentModified = 0;
+
+    // 构建文件节点列表
+    const fileNodes: Array<{
+      path: string;
+      name: string;
+      topic?: string;
+      linkCount: number;
+      recentChange?: string;
+      indexedAt: string;
+      status: string;
+    }> = [];
+
+    for (const f of activeFiles) {
+      const isRecent = f.indexed_at > since;
+      let recentChange: string | undefined;
+      if (isRecent) {
+        const details = this.getFileChangeDetails(f.id);
+        if (details) {
+          try {
+            const parsed = JSON.parse(details) as Array<{ type: string }>;
+            const types = new Set(parsed.map(d => d.type));
+            if (types.has('modified')) { recentChange = 'modified'; recentModified++; }
+            else if (types.has('added')) { recentChange = 'added'; recentAdded++; }
+            else recentChange = 'modified';
+          } catch { recentChange = 'modified'; recentModified++; }
+        } else {
+          recentChange = 'added'; recentAdded++;
+        }
+      }
+
+      fileNodes.push({
+        path: f.path,
+        name: f.path.replace(/\\/g, '/').split('/').pop() || f.path,
+        topic: topics.get(f.id),
+        linkCount: linkCounts.get(f.id) ?? 0,
+        recentChange,
+        indexedAt: f.indexed_at,
+        status: f.status,
+      });
+    }
+
+    // 构建路径前缀树
+    const root: FileTreeNode = { name: '', children: [] };
+    for (const fn of fileNodes) {
+      const parts = fn.path.replace(/\\/g, '/').split('/');
+      let node = root;
+      for (let i = 0; i < parts.length; i++) {
+        const isLast = i === parts.length - 1;
+        let child = node.children?.find((c: FileTreeNode) => c.name === parts[i]);
+        if (!child) {
+          child = isLast
+            ? {
+                name: parts[i],
+                path: fn.path,
+                topic: fn.topic,
+                linkCount: fn.linkCount,
+                recentChange: fn.recentChange as FileTreeNode['recentChange'],
+                children: [],
+              }
+            : { name: parts[i], children: [] };
+          node.children!.push(child);
+        }
+        node = child;
+      }
+    }
+
+    return {
+      tree: root.children || [],
+      recentAdded,
+      recentModified,
+      recentDeleted: deletedFiles.length,
+      totalFiles: activeFiles.length,
+    };
+  }
+
   getStatus(): IndexStatus {
     const fileRow = this.db.prepare("SELECT COUNT(*) as count FROM files WHERE status = 'active'").get() as { count: number };
     const nodeRow = this.db.prepare('SELECT COUNT(*) as count FROM doc_nodes').get() as { count: number };
@@ -546,15 +666,13 @@ export class SqliteDbAdapter {
         ? lrList.join(', ')
         : lrList.slice(0, 5).join(', ') + ` …等 ${lrList.length} 处`;
 
-      // 聚合标题路径（去重，取前 5 个，超出标 …）
+      // 聚合标题路径：提取公共前缀，树形压缩展示
       const hpSet = new Set<string>();
       for (const d of details) {
         if (d.headingPath) hpSet.add(d.headingPath);
       }
       const hpList = [...hpSet].filter(Boolean);
-      const headingPath = hpList.length <= 5
-        ? hpList.join('; ')
-        : hpList.slice(0, 5).join('; ') + ` …等 ${hpList.length} 处`;
+      const headingPath = compactHeadingPaths(hpList);
 
       // 聚合关键词
       const allBold = new Set<string>();
@@ -644,6 +762,10 @@ export class SqliteDbAdapter {
   // 内部方法
   // =========================================================================
 
+  // =========================================================================
+  // 内部方法
+  // =========================================================================
+
   private executeSchema(): void {
     const schemaPath = this.resolveSchemaPath();
     const schema = fs.readFileSync(schemaPath, 'utf-8');
@@ -672,4 +794,86 @@ export class SqliteDbAdapter {
 
     throw new Error('Cannot locate schema.sql');
   }
+}
+
+// =============================================================================
+// compactHeadingPaths — 标题路径智能去重压缩
+// 提取公共前缀，树形聚合，去除冗余，突出差异信息
+// 例：["A > B > C", "A > B > D", "A > E"] => "A > B(C, D); E"
+// =============================================================================
+function compactHeadingPaths(paths: string[]): string {
+  if (paths.length === 0) return '';
+  if (paths.length === 1) return paths[0];
+
+  const MAX_GROUPS = 5;
+  const segments = paths.map(p => p.split(' > '));
+
+  // 找最长公共前缀
+  const minLen = Math.min(...segments.map(s => s.length));
+  let lcpLen = 0;
+  for (let i = 0; i < minLen; i++) {
+    const seg = segments[0][i];
+    if (segments.every(s => s[i] === seg)) {
+      lcpLen++;
+    } else {
+      break;
+    }
+  }
+
+  const prefix = segments[0].slice(0, lcpLen).join(' > ');
+
+  // 去掉公共前缀，建树
+  type HpNode = { name: string; children: Map<string, HpNode> };
+  const root: HpNode = { name: '', children: new Map() };
+
+  for (const segs of segments) {
+    const rest = segs.slice(lcpLen);
+    if (rest.length === 0) continue; // 完全匹配前缀的跳过
+    let node = root;
+    for (const seg of rest) {
+      if (!node.children.has(seg)) {
+        node.children.set(seg, { name: seg, children: new Map() });
+      }
+      node = node.children.get(seg)!;
+    }
+  }
+
+  // 格式化树为紧凑字符串
+  function formatNode(node: HpNode): string {
+    const childNames = [...node.children.keys()];
+    if (childNames.length === 0) return node.name;
+
+    const parts: string[] = [];
+    for (const [name, child] of node.children) {
+      const sub = formatNode(child);
+      if (sub === name) {
+        parts.push(name);
+      } else {
+        // 子节点名 = 父 + 子格式化结果（用括号包裹多个孙节点）
+        parts.push(sub);
+      }
+    }
+    return parts.join(', ');
+  }
+
+  // 收集顶层分组
+  const groups: string[] = [];
+  for (const [name, child] of root.children) {
+    const sub = formatNode(child);
+    groups.push(sub === name ? name : `${name}(${sub})`);
+  }
+
+  const totalGroups = groups.length;
+  let result = prefix;
+
+  if (groups.length > 0) {
+    const shown = groups.slice(0, MAX_GROUPS);
+    result += (result ? ' > ' : '') + shown.join(', ');
+  }
+
+  if (totalGroups > MAX_GROUPS) {
+    result += ` …等 ${totalGroups} 组`;
+  }
+
+  return result || paths[0];
 }

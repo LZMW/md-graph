@@ -162,4 +162,64 @@ export class TemplateEngine {
 
     return result;
   }
+
+  // =========================================================================
+  // renderFiles — md_files 已索引文档全貌
+  // =========================================================================
+  renderFiles(data: Record<string, unknown>): string {
+    const totalFiles = data['totalFiles'] as number ?? 0;
+    const recentAdded = data['recentAdded'] as number ?? 0;
+    const recentModified = data['recentModified'] as number ?? 0;
+    const recentDeleted = data['recentDeleted'] as number ?? 0;
+    const tree = data['tree'] as Array<Record<string, unknown>> ?? [];
+
+    // 变更摘要行
+    const parts: string[] = [];
+    if (recentAdded > 0) parts.push(`+${recentAdded} 新增`);
+    if (recentModified > 0) parts.push(`✎${recentModified} 修改`);
+    if (recentDeleted > 0) parts.push(`-${recentDeleted} 删除`);
+    const changeLine = parts.length > 0 ? `📊 最近 30 分钟: ${parts.join(' · ')}` : '📊 最近 30 分钟: 无变更';
+
+    let result = `## 已索引文档 (${totalFiles} 个文件)\n\n${changeLine}\n`;
+
+    // 递归渲染目录树
+    const renderTree = (nodes: Array<Record<string, unknown>>, indent: string): string => {
+      let out = '';
+      for (const n of nodes) {
+        const name = n['name'] as string ?? '';
+        const isDir = (n['children'] as Array<unknown>)?.length > 0;
+        const topic = n['topic'] as string | undefined;
+        const linkCount = n['linkCount'] as number | undefined;
+        const rc = n['recentChange'] as string | undefined;
+        const path = n['path'] as string | undefined;
+
+        if (isDir) {
+          out += `${indent}${name}/\n`;
+          out += renderTree(n['children'] as Array<Record<string, unknown>>, indent + '  ');
+        } else {
+          // 文件行: 文件名 — 主题 · N 条外链 [标记]
+          let fileLine = `${indent}${name}`;
+          if (topic) fileLine += ` — ${topic}`;
+          if (linkCount && linkCount > 0) fileLine += ` · ${linkCount} 条外链`;
+
+          // 最近变更标记
+          if (rc === 'added') fileLine += ' ✚';
+          else if (rc === 'modified') fileLine += ' ✎';
+          else if (rc === 'deleted') fileLine += ' ✕';
+
+          out += fileLine + '\n';
+        }
+      }
+      return out;
+    };
+
+    result += '\n' + renderTree(tree, '');
+
+    // 底部：删除文件提示
+    if (recentDeleted > 0) {
+      result += '\n⚠ 最近删除的文件仍保留索引记录，路径标记 ✕。';
+    }
+
+    return result;
+  }
 }

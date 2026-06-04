@@ -337,6 +337,21 @@ export class MdGraph {
   }
 
   // =========================================================================
+  // renderFiles — 渲染文件树全貌
+  // =========================================================================
+  async renderFiles(): Promise<string> {
+    await this.ensureInitialized();
+    const ft = this.db.getFileTree();
+    return this.template.renderFiles({
+      totalFiles: ft.totalFiles,
+      recentAdded: ft.recentAdded,
+      recentModified: ft.recentModified,
+      recentDeleted: ft.recentDeleted,
+      tree: ft.tree,
+    });
+  }
+
+  // =========================================================================
   // 内部方法
   // =========================================================================
 

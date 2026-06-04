@@ -77,6 +77,7 @@ export interface MdGraphFacade {
   renderStatus(): Promise<string>;
   renderSearch(query: string, options?: { maxResults?: number; offset?: number; type?: 'heading' | 'paragraph' | 'code_block'; file?: string }): Promise<string>;
   renderNavigate(nodeIdOrPath: number | string, direction: string, depth?: number): Promise<string>;
+  renderFiles(): Promise<string>;
 }
 
 // =============================================================================
@@ -214,6 +215,9 @@ export class McpServer {
         case 'md_navigate':
           result = await this.callNavigate(args);
           break;
+        case 'md_files':
+          result = await this.callFiles();
+          break;
         default:
           return {
             jsonrpc: '2.0',
@@ -310,6 +314,13 @@ export class McpServer {
     return {
       content: [{ type: 'text', text }],
     };
+  }
+
+  /** 调用 md_files 工具 */
+  private async callFiles(): Promise<ToolResult> {
+    if (!this.graph) return this.noProject();
+    const text = await this.graph.renderFiles();
+    return { content: [{ type: 'text', text }] };
   }
 
   /** 调用 md_navigate 工具 */

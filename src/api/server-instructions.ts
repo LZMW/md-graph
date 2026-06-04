@@ -21,7 +21,8 @@ md-graph 是一个 Markdown 知识图谱引擎。它索引 Markdown 文件中的
 |------|------|----------|----------|
 | md_status | 变更感知入口 — 查看最近被修改、新增、删除的 MD 文件 | 无 | batches, since, limit |
 | md_search | 全文搜索匹配内容 | query | maxResults, type, file |
-| md_navigate | 浏览节点关系（入链/出链） | direction，以及 nodeId 或 path（二选一） | depth |
+| md_navigate | 浏览节点关系（入链/出链） | direction，以及 nodeId 或 path（二选一） | depth, maxResults |
+| md_files | 已索引文件全貌（目录树 + 最近变更标记） | 无 | 无 |
 
 ## 三、详细描述
 
@@ -90,6 +91,21 @@ md-graph 是一个 Markdown 知识图谱引擎。它索引 Markdown 文件中的
 **使用示例**:
 \`\`\`
 工具调用: md_navigate({ path: "docs/intro.md", direction: "outbound", depth: 1 })
+\`\`\`
+
+### 4. md_files — 文件全貌
+
+**何时使用**: 首次进入项目或不熟悉文档结构时，了解所有已索引 MD 文件的分布和主题。
+
+**返回内容**:
+- 按目录层级组织的文件树
+- 每个文件的 H1 标题主题和外链数量
+- 最近 30 分钟内新增(✚)和修改(✎)的文件标记
+- 顶部显示最近 30 分钟的变更统计摘要
+
+**使用示例**:
+\`\`\`
+工具调用: md_files({})
 \`\`\`
 
 ## 四、_next 解读
@@ -203,6 +219,15 @@ export function getToolDefinitions(): Array<{
           },
         },
         required: ['direction'],
+      },
+    },
+    {
+      name: 'md_files',
+      description: 'FILE TREE OVERVIEW — shows all indexed MD files organized by directory. Returns file names, H1 topics, outbound link counts, and marks files recently added (✚) or modified (✎) within the last 30 minutes. Use at the start of a session to see the full document landscape. For keyword search, use md_search. For link relationships, use md_navigate. For detailed change info, use md_status.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: [],
       },
     },
   ];

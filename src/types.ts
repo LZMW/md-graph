@@ -250,6 +250,18 @@ export interface ChangeBatchResult {
 }
 
 // ---------------------------------------------------------------------------
+// 文件树节点（md_files 工具）
+// ---------------------------------------------------------------------------
+export interface FileTreeNode {
+  name: string;
+  path?: string;
+  topic?: string;
+  linkCount?: number;
+  recentChange?: 'added' | 'modified' | 'deleted';
+  children?: FileTreeNode[];
+}
+
+// ---------------------------------------------------------------------------
 // 文件信息
 // ---------------------------------------------------------------------------
 export interface FileInfo {
